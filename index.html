@@ -1,0 +1,3533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Lost Artifact - A Text Adventure</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        .game-container {
+            background-color: #2d3748; /* Slightly lighter dark background */
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-lg */
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .game-output {
+            background-color: #1a202c;
+            min-height: 300px;
+            max-height: 600px;
+            overflow-y: auto;
+            border-bottom: 1px solid #4a5568;
+            padding: 1rem;
+            line-height: 1.6;
+            white-space: pre-wrap; /* Preserve whitespace and wrap text */
+            word-wrap: break-word; /* Break long words */
+        }
+        .game-stats {
+            background-color: #2d3748;
+            padding: 1rem;
+            border-bottom: 1px solid #4a5568;
+        }
+        .game-input-area {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .game-input {
+            background-color: #4a5568;
+            border: 1px solid #6b7280;
+            color: #e2e8f0;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            width: 100%;
+        }
+        .game-input:focus {
+            outline: none;
+            border-color: #63b3ed; /* blue-400 */
+            box-shadow: 0 0 0 3px rgba(99, 179, 237, 0.5); /* ring-2 focus:ring-blue-400 */
+        }
+        .game-button {
+            background-color: #4299e1; /* blue-500 */
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            transition: background-color 0.2s;
+            cursor: pointer;
+            border: none;
+            width: 100%;
+        }
+        .game-button:hover {
+            background-color: #3182ce; /* blue-600 */
+        }
+        .choice-button {
+            background-color: #4a5568;
+            color: #e2e8f0;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #6b7280;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            text-align: left;
+        }
+        .choice-button:hover {
+            background-color: #6b7280;
+        }
+        .choice-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container flex flex-col h-full">
+        <div id="game-output" class="game-output text-sm sm:text-base p-4">
+            <!-- Game messages will be displayed here -->
+        </div>
+
+        <div id="game-stats" class="game-stats p-4 text-sm sm:text-base grid grid-cols-2 gap-2">
+            <!-- Player stats will be displayed here -->
+        </div>
+
+        <div id="game-input-area" class="game-input-area p-4">
+            <input type="text" id="game-input" class="game-input" placeholder="Type your action or choice number...">
+            <button id="submit-button" class="game-button">Submit</button>
+            <div id="choice-buttons" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                <!-- Choice buttons will be dynamically added here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Global Game State Variables ---
+        let gameOutput;
+        let gameInput;
+        let submitButton;
+        let gameStats;
+        let choiceButtonsContainer;
+
+        let player;
+        let currentEnemy = null;
+        let gameState = 'characterCreation'; // States: 'characterCreation', 'intro', 'chooseOrigin', 'quest1', 'exploration', 'combat', 'choosePower', 'levelUpPerk', 'town', 'npcDialogue', 'gameOver', 'travelEvent', 'chooseEvolvedPower', 'bossCombat', 'dreamSequence', 'actIITrigger', 'branchingPath'
+        let currentScene = ''; // Tracks the current scene/location ID
+        let questState = {}; // Object to hold quest-specific states
+        let worldState = {}; // Object to hold world-specific flags and persistent consequences
+        let combatLog = []; // To store combat messages
+        let currentNPC = null; // Tracks the NPC currently being interacted with
+        let bossFightState = {}; // State for multi-phase boss fights
+        let verboseMode = false; // Set to true for more debug output
+
+        // --- Game Data ---
+        const classes = {
+            'warrior': {
+                description: 'A master of weapons and close combat. High Strength, good HP.',
+                baseStats: { hp: 120, mana: 30, strength: 15, intelligence: 5, dexterity: 8 },
+                abilities: {
+                    'basicAttack': { name: 'Sword Slash', damage: () => player.strength * 1.2, cost: 0, type: 'physical' },
+                    'power': { name: 'Cleave', damage: () => player.strength * 1.8, cost: 15, type: 'physical', description: 'A powerful swing hitting all enemies (if multiple).' }
+                }
+            },
+            'mage': {
+                description: 'A wielder of arcane magic. High Intelligence, good Mana.',
+                baseStats: { hp: 80, mana: 100, strength: 5, intelligence: 15, dexterity: 7 },
+                abilities: {
+                    'basicAttack': { name: 'Magic Missile', damage: () => player.intelligence * 1.5, cost: 0, type: 'magical' },
+                    'power': { name: 'Fireball', damage: () => player.intelligence * 2.5, cost: 25, type: 'magical', description: 'Unleashes a fiery explosion.' }
+                }
+            },
+            'rogue': {
+                description: 'Nimble and cunning, masters of stealth and precision. High Agility, critical hits.',
+                baseStats: { hp: 100, mana: 50, strength: 10, intelligence: 10, dexterity: 15 },
+                abilities: {
+                    'basicAttack': { name: 'Dagger Stab', damage: () => player.strength * 1.3, cost: 0, type: 'physical' },
+                    'power': { name: 'Shadow Strike', damage: () => player.strength * 2.0, cost: 20, type: 'physical', description: 'A quick, stealthy attack with increased critical chance.' }
+                }
+            }
+        };
+
+        const races = {
+            'human': { description: 'Versatile and adaptable.', statBonus: { strength: 2, intelligence: 2, dexterity: 1 } },
+            'elf': { description: 'Agile and wise.', statBonus: { mana: 10, intelligence: 3, dexterity: 2 } },
+            'dwarf': { description: 'Resilient and strong.', statBonus: { hp: 20, strength: 3, dexterity: 0 } }
+        };
+
+        const origins = {
+            'orphan': { description: 'Raised on the streets, you learned to be resourceful and quick. (+2 Strength, +5 HP, +2 Dexterity)', statBonus: { strength: 2, hp: 5, dexterity: 2 } },
+            'exiledMage': { description: 'Cast out for forbidden knowledge, your mind is sharp but your body weak. (+3 Intelligence, +15 Mana)', statBonus: { intelligence: 3, mana: 15 } },
+            'forgottenNoble': { description: 'Though your past is veiled, a natural charisma and resilience remain. (+1 Intelligence, +1 Strength, +10 HP)', statBonus: { intelligence: 1, strength: 1, hp: 10 } }
+        };
+
+        const spells = {
+            'emberbolt': {
+                name: 'Emberbolt',
+                description: 'Launches a small fiery projectile at a single enemy.',
+                cost: 10,
+                damage: (intelligence) => Math.floor(intelligence * 0.8 + Math.random() * 5), // 8-12 base damage
+                type: 'magical'
+            },
+            'wardlight': {
+                name: 'Wardlight',
+                description: 'Envelops you in a temporary shield, raising your defense.',
+                cost: 15,
+                effect: () => {
+                    player.defenseBuff = 5; // Example defense buff
+                    displayMessage('A shimmering Wardlight surrounds you, increasing your defense!');
+                },
+                type: 'buff'
+            },
+            'mindecho': {
+                name: 'Mind Echo',
+                description: 'Sends out a psychic pulse, revealing hidden information.',
+                cost: 5,
+                effect: (locationId) => {
+                    // This spell's effect is context-dependent, handled in handleExplorationInput
+                },
+                type: 'utility'
+            },
+            'healingtouch': {
+                name: 'Healing Touch',
+                description: 'Heals a moderate amount of HP.',
+                cost: 20,
+                effect: () => {
+                    const healAmount = Math.floor(player.intelligence * 1.5 + Math.random() * 10);
+                    player.heal(healAmount);
+                    displayMessage(`You cast Healing Touch, restoring ${healAmount} HP!`);
+                },
+                type: 'healing'
+            },
+            'frostnova': {
+                name: 'Frost Nova',
+                description: 'Deals ice damage to all enemies and has a chance to slow them.',
+                cost: 30,
+                damage: (intelligence) => Math.floor(intelligence * 1.2 + Math.random() * 8),
+                type: 'magical_aoe'
+            }
+        };
+
+        const powers = {
+            'soulfire': {
+                name: 'Soulfire',
+                description: 'Your basic attacks have a chance to burn enemies, dealing extra damage over time.',
+                effect: 'passive', // Handled in basic attack calculation
+                evolved: 'infernalHalo'
+            },
+            'shadowstep': {
+                name: 'Shadowstep',
+                description: 'Once per combat, you can attempt to dodge an incoming attack.',
+                effect: 'active', // Handled in combat turn
+                evolved: 'fadewalk'
+            },
+            'echoofages': {
+                name: 'Echo of Ages',
+                description: 'You gain extra XP from all sources.',
+                effect: 'passive', // Handled in gainXP
+                evolved: 'timelostWisdom'
+            }
+        };
+
+        const evolvedPowers = {
+            'infernalHalo': {
+                name: 'Infernal Halo',
+                description: 'Your spells have a chance to ignite all enemies, dealing fire damage over time.',
+                effect: 'passive_spell_aoe' // Handled in spell casting
+            },
+            'fadewalk': {
+                name: 'Fadewalk',
+                description: 'Once per battle, fully evade all attacks for a turn.',
+                effect: 'active_evade' // Handled in combat turn
+            },
+            'timelostWisdom': {
+                name: 'Timelost Wisdom',
+                description: 'Gain insight before choices (preview consequences).',
+                effect: 'utility_preview' // Handled in exploration/dialogue
+            }
+        };
+
+        const weapons = {
+            'rustyShortSword': { name: 'Rusty Short Sword', attackBonus: 2, defenseBonus: 0, type: 'weapon', value: 10 },
+            'woodenStaff': { name: 'Wooden Staff', attackBonus: 1, defenseBonus: 0, type: 'weapon', value: 8 },
+            'wornLeatherDagger': { name: 'Worn Leather Dagger', attackBonus: 1, defenseBonus: 0, type: 'weapon', value: 7 },
+            'ironSword': { name: 'Iron Sword', attackBonus: 5, defenseBonus: 0, type: 'weapon', value: 50 },
+            'enchantedDaggers': { name: 'Enchanted Daggers', attackBonus: 8, defenseBonus: 0, type: 'weapon', value: 150, questItem: true },
+            'elvenBow': { name: 'Elven Bow', attackBonus: 7, defenseBonus: 0, type: 'weapon', value: 120 },
+            'obsidianGreatsword': { name: 'Obsidian Greatsword', attackBonus: 12, defenseBonus: 0, type: 'weapon', value: 300 }
+        };
+
+        const armor = {
+            'tatteredRobe': { name: 'Tattered Robe', defenseBonus: 1, type: 'armor', value: 5 },
+            'leatherVest': { name: 'Leather Vest', defenseBonus: 2, type: 'armor', value: 15 },
+            'crudeShield': { name: 'Crude Shield', defenseBonus: 3, type: 'armor', value: 20 },
+            'forestCloak': { name: 'Forest Cloak', defenseBonus: 4, type: 'armor', value: 80 },
+            'runicPlate': { name: 'Runic Plate', defenseBonus: 8, type: 'armor', value: 250 }
+        };
+
+        const potions = {
+            'healingPotion': { name: 'Healing Potion', type: 'potion', effect: () => { player.heal(30); displayMessage('You drink a Healing Potion, restoring 30 HP!'); }, value: 20 },
+            'manaElixir': { name: 'Mana Elixir', type: 'potion', effect: () => { player.restoreMana(40); displayMessage('You drink a Mana Elixir, restoring 40 Mana!'); }, value: 25 }
+        };
+
+        const questItems = {
+            'emberboltSpellScroll': { name: 'Emberbolt Spell Scroll', type: 'quest', questItem: true, value: 0 },
+            'missingShipment': { name: 'Missing Shipment', type: 'quest', questItem: true, value: 0 },
+            'ancientTome': { name: 'Ancient Tome', type: 'quest', questItem: true, value: 0 },
+            'fireCrystal': { name: 'Fire Crystal', type: 'quest', questItem: true, value: 0 }
+        };
+
+        const perks = {
+            'statBoostStrength': { name: 'Stat Boost (Strength)', type: 'stat', stat: 'strength', amount: 3 },
+            'statBoostIntelligence': { name: 'Stat Boost (Intelligence)', type: 'stat', stat: 'intelligence', amount: 3 },
+            'statBoostDexterity': { name: 'Stat Boost (Dexterity)', type: 'stat', stat: 'dexterity', amount: 3 },
+            'newSpellHealingTouch': { name: 'New Spell (Healing Touch)', type: 'spell', spellId: 'healingtouch' },
+            'newSpellFrostNova': { name: 'New Spell (Frost Nova)', type: 'spell', spellId: 'frostnova' },
+            'upgradeSoulfire': { name: 'Upgrade Power (Soulfire)', type: 'power_upgrade', powerId: 'soulfire', description: 'Increases Soulfire burn damage.' },
+            'upgradeShadowstep': { name: 'Upgrade Power (Shadowstep)', type: 'power_upgrade', powerId: 'shadowstep', description: 'Increases Shadowstep dodge chance.' },
+            'upgradeEchoOfAges': { name: 'Upgrade Power (Echo of Ages)', type: 'power_upgrade', powerId: 'echoofages', description: 'Increases Echo of Ages XP bonus.' }
+        };
+
+        const unlockedSpellsForLevelUp = ['healingtouch', 'frostnova']; // Spells available to choose at level up
+
+        const locations = {
+            'ashvaleRuins': {
+                name: 'Ashvale Ruins',
+                description: 'The air hangs heavy with the scent of ash and decay. Charred timbers and collapsed roofs are all that remain of what was once a bustling village. A scorched obelisk stands eerily in the center, glowing faintly with a strange sigil. A chilling silence blankets the area, broken only by the distant rustle of leaves. You see a path leading to the north, and a dense forest to the east. The remains of a grander building, perhaps a temple, are visible to the west. To the south, you see signs of a makeshift camp.',
+                choices: [
+                    { text: 'Head North (towards a distant mountain)', action: 'explore', target: 'mountainPath' },
+                    { text: 'Venture East (into the dense forest)', action: 'explore', target: 'denseForest' },
+                    { text: 'Investigate the Scorched Obelisk', action: 'investigateObelisk' },
+                    { text: 'Enter the Ruined Temple (West)', action: 'explore', target: 'villageTemple' },
+                    { text: 'Go to New Ashvale (South)', action: 'explore', target: 'newAshvale' }
+                ],
+                enemies: []
+            },
+            'mountainPath': {
+                name: 'Mountain Path',
+                description: 'The path winds steeply upwards, flanked by jagged rocks and sparse, wind-battered trees. The air grows colder, and a sense of isolation settles upon you. A narrow cave entrance is visible to your left, and the path continues to ascend.',
+                choices: [
+                    { text: 'Enter the narrow cave', action: 'explore', target: 'gloomyCave' },
+                    { text: 'Continue ascending the mountain path', action: 'explore', target: 'mountainPeak' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: ['goblinScout'] // Example enemy
+            },
+            'gloomyCave': {
+                name: 'Gloomy Cave',
+                description: 'The air inside the cave is damp and smells of damp earth and something else... something foul. Shadows dance on the uneven walls, and the sound of dripping water echoes ominously. You hear a low growl from deeper within.',
+                choices: [
+                    { text: 'Proceed deeper into the cave', action: 'combat', target: 'goblinWarrior' },
+                    { text: 'Retreat to the Mountain Path', action: 'explore', target: 'mountainPath' }
+                ],
+                enemies: [] // Enemy triggered by choice
+            },
+            'denseForest': {
+                name: 'Dense Forest',
+                description: 'Ancient, gnarled trees loom overhead, their branches interwoven to form a perpetual twilight. The ground is covered in a thick carpet of moss and fallen leaves, muffling your footsteps. Strange sounds emanate from the undergrowth.',
+                choices: [
+                    { text: 'Follow a faint game trail', action: 'explore', target: 'forestClearing' },
+                    { text: 'Try to find a hidden glade', action: 'searchForest' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: ['direWolf']
+            },
+            'forestClearing': {
+                name: 'Forest Clearing',
+                description: 'A small, sun-dappled clearing opens up in the heart of the dense forest. Wildflowers bloom in vibrant colors, and a small, clear stream babbles softly. It seems peaceful, but a keen eye might spot signs of recent activity.',
+                choices: [
+                    { text: 'Investigate the stream', action: 'investigateStream' },
+                    { text: 'Look for tracks around the clearing', action: 'searchTracks' },
+                    { text: 'Return to the Dense Forest', action: 'explore', target: 'denseForest' }
+                ],
+                enemies: []
+            },
+            'mountainPeak': {
+                name: 'Mountain Peak',
+                description: 'You stand atop the highest peak, the wind whipping around you. Below, the world stretches out like a crumpled map, vast and indifferent. The air is thin, and the silence is profound, broken only by the howl of the wind.',
+                choices: [
+                    { text: 'Look for anything unusual in the distance', action: 'searchPeak' },
+                    { text: 'Descend back down the Mountain Path', action: 'explore', target: 'mountainPath' }
+                ],
+                enemies: []
+            },
+            'villageTemple': {
+                name: 'Ruined Temple',
+                description: 'The temple, though ravaged by the catastrophe, still holds a sense of ancient power. Crumbling pillars reach towards the sky, and faded frescoes adorn the remaining walls. Debris litters the floor, and a faint magical aura seems to linger.',
+                choices: [
+                    { text: 'Search the altar area', action: 'searchTempleAltar' },
+                    { text: 'Examine the fallen statues', action: 'examineStatues' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: []
+            },
+            'newAshvale': {
+                name: 'New Ashvale',
+                description: 'A small, bustling survivor camp has been established amidst the less damaged parts of the old village. Tents are pitched, fires burn, and the air is filled with the murmur of voices. This is New Ashvale, a beacon of hope in the ruined land. You see a healer\'s tent, a makeshift market, and various villagers going about their day.',
+                choices: [
+                    { text: 'Visit the Healer\'s Tent', action: 'visitHealer' },
+                    { text: 'Browse the Makeshift Market', action: 'browseMarket' },
+                    { text: 'Speak with Seren the Lightbinder', action: 'speakNPC', target: 'seren' },
+                    { text: 'Speak with Varric of the Hollow', action: 'speakNPC', target: 'varric' },
+                    { text: 'Speak with Elder Maelin', action: 'speakNPC', target: 'maelin' },
+                    { text: 'Save Game', action: 'saveGame' },
+                    { text: 'Load Game', action: 'loadGame' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: []
+            },
+            'whisperingForest': {
+                name: 'Whispering Forest',
+                description: 'Ancient trees with gnarled branches twist into unnatural shapes, their leaves a perpetual, unsettling whisper. Strange, ethereal lights flicker amongst the foliage, and the air hums with faint, illusory magic. It feels as though the forest itself is watching you.',
+                choices: [
+                    { text: 'Follow the faint path deeper into the woods', action: 'explore', target: 'forestHeart' },
+                    { text: 'Search for hidden clearings', action: 'searchWhisperingForest' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: ['pixieTrickster', 'forestGuardian']
+            },
+            'forestHeart': {
+                name: 'Heart of the Whispering Forest',
+                description: 'The air here is thick with ancient magic. The trees grow so close together that the sky is barely visible. A sense of profound peace, yet also immense power, emanates from a central, glowing shrine.',
+                choices: [
+                    { text: 'Approach the glowing shrine', action: 'approachShrine' },
+                    { text: 'Return to Whispering Forest', action: 'explore', target: 'whisperingForest' }
+                ],
+                enemies: []
+            },
+            'ruinsOfEldermoor': {
+                name: 'Ruins of Eldermoor',
+                description: 'The skeletal remains of a once-proud stronghold, Eldermoor now stands as a testament to forgotten wars. Crumbling stone walls, collapsed towers, and a pervasive chill speak of its current inhabitants: the restless dead. The air is heavy with the scent of dust and decay.',
+                choices: [
+                    { text: 'Enter the main keep', action: 'explore', target: 'eldermoorKeep' },
+                    { text: 'Investigate the outer barracks', action: 'investigateBarracks' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: ['skeletonWarrior', 'ghoul']
+            },
+            'eldermoorKeep': {
+                name: 'Eldermoor Keep',
+                description: 'The great hall of Eldermoor Keep is a cavernous space, filled with shadows. Banners hang in tatters, and the floor is littered with debris. A chilling wind whistles through broken windows, and you hear the clatter of bones from deeper within.',
+                choices: [
+                    { text: 'Search the library remains', action: 'searchLibrary' },
+                    { text: 'Proceed to the lower dungeons', action: 'explore', target: 'eldermoorDungeon' },
+                    { text: 'Return to Ruins of Eldermoor', action: 'explore', target: 'ruinsOfEldermoor' }
+                ],
+                enemies: []
+            },
+            'eldermoorDungeon': {
+                name: 'Eldermoor Dungeons',
+                description: 'The air in the dungeons is thick with the stench of death and damp earth. Cells stand open, their iron bars twisted. You hear faint moans and scratching sounds in the darkness.',
+                choices: [
+                    { text: 'Explore deeper into the cells', action: 'exploreDungeonCells' },
+                    { text: 'Return to Eldermoor Keep', action: 'explore', target: 'eldermoorKeep' }
+                ],
+                enemies: ['ghoul']
+            },
+            'blisterforgeCaverns': {
+                name: 'Blisterforge Caverns',
+                description: 'The air here is thick with sulfur and heat. The cavern walls glow with pulsating veins of molten rock, and the ground trembles faintly beneath your feet. The roar of distant magma flows echoes through the vast chambers.',
+                choices: [
+                    { text: 'Follow the main lava flow', action: 'explore', target: 'lavaChamber' },
+                    { text: 'Search for rare mineral deposits', action: 'mineMinerals' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: ['fireElemental', 'magmaLurker']
+            },
+            'lavaChamber': {
+                name: 'Great Lava Chamber',
+                description: 'A vast cavern dominated by a lake of bubbling, incandescent lava. Heat radiates in waves, and the air shimmers. Strange, fiery creatures can be seen moving within the molten rock.',
+                choices: [
+                    { text: 'Look for a path across the chamber', action: 'findPath' },
+                    { text: 'Return to Blisterforge Caverns', action: 'explore', target: 'blisterforgeCaverns' }
+                ],
+                enemies: ['fireElemental']
+            },
+            'veilscarCrater': {
+                name: 'Veilscar Crater',
+                description: 'The ground here is scorched and fractured, radiating raw magical energy. A massive rift tears through the sky, revealing glimpses of chaotic, alien landscapes. Corrupted spirits and distorted creatures writhe within the crackling energies. The air is thick with ozone and despair.',
+                choices: [
+                    { text: 'Approach the rift (DANGER!)', action: 'explore', target: 'riftEdge' },
+                    { text: 'Search for survivors or clues', action: 'searchCrater' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: ['corruptedSpirit', 'riftSpawn']
+            },
+            'riftEdge': {
+                name: 'Edge of the Veil',
+                description: 'You stand at the precipice of the Veil Between Realms. The air crackles with unstable magic, pulling at your very essence. Visions of other worlds flash before your eyes, both terrifying and alluring. A powerful, unseen force emanates from the tear.',
+                choices: [
+                    { text: 'Attempt to stabilize the Veil (Virtuous Path)', action: 'stabilizeVeil' },
+                    { text: 'Attempt to draw power from the Veil (Corrupt Path)', action: 'drawPowerFromVeil' },
+                    { text: 'Observe the Veil from a safe distance (Neutral Path)', action: 'observeVeil' },
+                    { text: 'Retreat from the Veilscar Crater', action: 'explore', target: 'veilscarCrater' }
+                ],
+                enemies: []
+            },
+            'templeOfShatteredOath': {
+                name: 'Temple of the Shattered Oath',
+                description: 'Ancient, colossal ruins rise from the earth, overgrown with strange, phosphorescent moss. This temple feels imbued with a solemn, forgotten power. Statues of armored guardians stand broken, their faces etched with sorrow. The air is heavy with silence and the weight of broken promises.',
+                choices: [
+                    { text: 'Investigate the central altar', action: 'investigateShatteredAltar' },
+                    { text: 'Examine the guardian statues', action: 'examineGuardianStatues' },
+                    { text: 'Return to Ashvale Ruins', action: 'explore', target: 'ashvaleRuins' }
+                ],
+                enemies: ['ancientGuardianRemnant', 'spectralWarrior']
+            }
+        };
+
+        const enemies = {
+            'goblinScout': {
+                name: 'Goblin Scout',
+                hp: 40,
+                maxHp: 40,
+                strength: 8,
+                intelligence: 2,
+                dexterity: 10,
+                xpReward: 20,
+                attack: () => Math.floor(Math.random() * 5) + 4, // 4-8 damage
+                description: 'A small, green-skinned goblin, armed with a rusty dagger.'
+            },
+            'goblinWarrior': {
+                name: 'Goblin Warrior',
+                hp: 70,
+                maxHp: 70,
+                strength: 12,
+                intelligence: 3,
+                dexterity: 8,
+                xpReward: 50,
+                attack: () => Math.floor(Math.random() * 7) + 6, // 6-12 damage
+                description: 'A more heavily armored goblin, wielding a crude axe.'
+            },
+            'direWolf': {
+                name: 'Dire Wolf',
+                hp: 90,
+                maxHp: 90,
+                strength: 15,
+                intelligence: 5,
+                dexterity: 12,
+                xpReward: 75,
+                attack: () => Math.floor(Math.random() * 8) + 8, // 8-15 damage
+                description: 'A massive, grey-furred wolf with glowing red eyes.'
+            },
+            'corruptedSpirit': {
+                name: 'Corrupted Spirit',
+                hp: 60,
+                maxHp: 60,
+                strength: 10,
+                intelligence: 10,
+                dexterity: 15,
+                xpReward: 40,
+                attack: () => Math.floor(Math.random() * 6) + 7, // 7-12 damage
+                description: 'A translucent, wailing figure, a remnant of Ashvale\'s past.'
+            },
+            'corruptedBeast': {
+                name: 'Corrupted Beast',
+                hp: 80,
+                maxHp: 80,
+                strength: 14,
+                intelligence: 5,
+                dexterity: 7,
+                xpReward: 60,
+                attack: () => Math.floor(Math.random() * 7) + 9, // 9-15 damage
+                description: 'A mutated creature, its body twisted by dark magic.'
+            },
+            'rogueElemental': {
+                name: 'Rogue Elemental',
+                hp: 100,
+                maxHp: 100,
+                strength: 10,
+                intelligence: 12,
+                dexterity: 5,
+                xpReward: 80,
+                attack: () => Math.floor(Math.random() * 8) + 10, // 10-17 damage
+                description: 'A swirling mass of uncontrolled elemental energy.'
+            },
+            'banditThug': {
+                name: 'Bandit Thug',
+                hp: 50,
+                maxHp: 50,
+                strength: 10,
+                intelligence: 5,
+                dexterity: 8,
+                xpReward: 30,
+                attack: () => Math.floor(Math.random() * 6) + 5, // 5-10 damage
+                description: 'A brutish bandit, looking for trouble.'
+            },
+            'pixieTrickster': {
+                name: 'Pixie Trickster',
+                hp: 30,
+                maxHp: 30,
+                strength: 5,
+                intelligence: 15,
+                dexterity: 20,
+                xpReward: 25,
+                attack: () => Math.floor(Math.random() * 4) + 2, // 2-5 damage, but can apply debuffs
+                description: 'A mischievous fae creature, quick and elusive.'
+            },
+            'forestGuardian': {
+                name: 'Forest Guardian',
+                hp: 110,
+                maxHp: 110,
+                strength: 18,
+                intelligence: 10,
+                dexterity: 10,
+                xpReward: 90,
+                attack: () => Math.floor(Math.random() * 9) + 12, // 12-20 damage
+                description: 'An ancient, treelike entity, protector of the Whispering Forest.'
+            },
+            'skeletonWarrior': {
+                name: 'Skeleton Warrior',
+                hp: 60,
+                maxHp: 60,
+                strength: 12,
+                intelligence: 5,
+                dexterity: 7,
+                xpReward: 45,
+                attack: () => Math.floor(Math.random() * 6) + 7, // 7-12 damage
+                description: 'The reanimated bones of a fallen soldier, armed with a rusty sword.'
+            },
+            'ghoul': {
+                name: 'Ghoul',
+                hp: 80,
+                maxHp: 80,
+                strength: 15,
+                intelligence: 6,
+                dexterity: 9,
+                xpReward: 70,
+                attack: () => Math.floor(Math.random() * 7) + 9, // 9-15 damage, can inflict minor poison
+                description: 'A decaying humanoid, driven by insatiable hunger.'
+            },
+            'fireElemental': {
+                name: 'Fire Elemental',
+                hp: 95,
+                maxHp: 95,
+                strength: 16,
+                intelligence: 14,
+                dexterity: 6,
+                xpReward: 85,
+                attack: () => Math.floor(Math.random() * 8) + 11, // 11-18 fire damage
+                description: 'A creature of living flame, radiating intense heat.'
+            },
+            'magmaLurker': {
+                name: 'Magma Lurker',
+                hp: 120,
+                maxHp: 120,
+                strength: 20,
+                intelligence: 8,
+                dexterity: 5,
+                xpReward: 100,
+                attack: () => Math.floor(Math.random() * 10) + 15, // 15-24 crushing damage
+                description: 'A massive, rock-skinned beast that emerges from molten rock.'
+            },
+            'hollowKnight': {
+                name: 'The Hollow Knight',
+                hp: 300,
+                maxHp: 300,
+                strength: 25,
+                intelligence: 15,
+                dexterity: 15,
+                xpReward: 500,
+                description: 'A towering, spectral knight, guardian of Eldermoor\'s secrets. Its movements are silent, its blade chillingly precise.',
+                phases: [
+                    { name: "Spectral Assault", hpThreshold: 0.6, abilities: [{ name: "Shadow Slash", damage: () => Math.floor(player.strength * 0.8 + Math.random() * 10) + 15, type: 'physical' }] },
+                    { name: "Soul Drain", hpThreshold: 0.3, abilities: [{ name: "Soul Siphon", damage: () => Math.floor(player.intelligence * 0.7 + Math.random() * 8) + 10, type: 'magical', heal: 20 }] },
+                    { name: "Desperate Fury", hpThreshold: 0, abilities: [{ name: "Phantom Strike", damage: () => Math.floor(player.strength * 1.0 + Math.random() * 12) + 20, type: 'physical_crit', critChance: 0.3 }] }
+                ],
+                currentPhase: 0
+            },
+            'ashwyrm': {
+                name: 'Ashwyrm, the Flame Warden',
+                hp: 400,
+                maxHp: 400,
+                strength: 20,
+                intelligence: 25,
+                dexterity: 10,
+                xpReward: 750,
+                description: 'A colossal fire serpent, its scales shimmer with molten heat. It guards the heart of the Blisterforge Caverns, its roar echoing like a volcanic eruption.',
+                phases: [
+                    { name: "Molten Breath", hpThreshold: 0.7, abilities: [{ name: "Fiery Cone", damage: () => Math.floor(player.intelligence * 0.9 + Math.random() * 12) + 20, type: 'magical_aoe_fire' }] },
+                    { name: "Inferno Charge", hpThreshold: 0.4, abilities: [{ name: "Lava Burst", damage: () => Math.floor(player.strength * 0.7 + Math.random() * 15) + 25, type: 'physical_fire' }] },
+                    { name: "Volcanic Eruption", hpThreshold: 0, abilities: [{ name: "Magma Geyser", damage: () => Math.floor(player.intelligence * 1.2 + Math.random() * 15) + 30, type: 'magical_aoe_fire_dot' }] }
+                ],
+                currentPhase: 0
+            },
+            'riftSpawn': {
+                name: 'Rift Spawn',
+                hp: 150,
+                maxHp: 150,
+                strength: 20,
+                intelligence: 15,
+                dexterity: 10,
+                xpReward: 120,
+                attack: () => Math.floor(Math.random() * 10) + 15, // 15-24 damage
+                description: 'A grotesque creature born from the Veil, its form constantly shifting.'
+            },
+            'ancientGuardianRemnant': {
+                name: 'Ancient Guardian Remnant',
+                hp: 180,
+                maxHp: 180,
+                strength: 22,
+                intelligence: 12,
+                dexterity: 8,
+                xpReward: 150,
+                attack: () => Math.floor(Math.random() * 12) + 18, // 18-29 damage
+                description: 'A fragment of a colossal guardian, animated by ancient magic and a sense of duty.'
+            },
+            'spectralWarrior': {
+                name: 'Spectral Warrior',
+                hp: 100,
+                maxHp: 100,
+                strength: 18,
+                intelligence: 10,
+                dexterity: 15,
+                xpReward: 90,
+                attack: () => Math.floor(Math.random() * 8) + 12, // 12-19 damage
+                description: 'The ghostly echo of a temple defender, still bound to its oath.'
+            }
+        };
+
+        const npcs = {
+            'seren': {
+                name: 'Seren the Lightbinder',
+                faction: 'orderOfFlame',
+                description: 'A battle-worn priestess, her eyes hold a weary wisdom. She wears the symbol of the Order of Flame.',
+                dialogue: {
+                    initial: "Greetings, stranger. The light of the Flame guides us even in these dark times. What brings you to New Ashvale?",
+                    questAvailable: "The Shadow Syndicate has intercepted a shipment of enchanted daggers meant for our forces. We need them back. Will you retrieve the 'Enchanted Daggers' for the Order?",
+                    questInProgress: "Have you found the missing shipment of daggers yet? The Order needs them.",
+                    questComplete: "You have returned the daggers! The Order of Flame is grateful for your loyalty. Take this as a reward.",
+                    afterQuest: "May the Flame illuminate your path, always.",
+                    forestQuestAvailable: "The Whispering Forest has grown restless. Travelers speak of illusions and strange disappearances. Investigate the forest and find any lost souls or artifacts.",
+                    forestQuestInProgress: "The Whispering Forest still calls. Have you found anything of note?",
+                    forestQuestComplete: "You have brought peace to the Whispering Forest! Your dedication to the innocent is commendable. The Order thanks you.",
+                    actII_virtuous: "The Veil is torn, a wound upon the world. The Order of Flame will strive to mend it. Your virtuous spirit is a beacon in these dark times.",
+                    actII_corrupt: "The Veil is torn, a wound upon the world. Your path, however... it concerns me. Be wary of the shadows you embrace.",
+                    actII_neutral: "The Veil is torn, a wound upon the world. Your chosen path is your own, but remember, true strength lies in unity."
+                },
+                choices: {
+                    initial: [
+                        { text: "Tell me about the Order of Flame.", action: "dialogue", target: "seren_aboutOrder", morality: 0 },
+                        { text: "Do you have any tasks for me?", action: "dialogue", target: "seren_quest", morality: 0 },
+                        { text: "I must go.", action: "endDialogue", morality: 0 }
+                    ],
+                    seren_aboutOrder: [
+                        { text: "Seren: We are the guardians of light, fighting against the encroaching shadows. Our purpose is to restore order and protect the innocent.", action: "dialogue", target: "seren_initial", morality: 0 }
+                    ],
+                    seren_quest: [
+                        { text: "Seren: " + "The Shadow Syndicate has intercepted a shipment of enchanted daggers meant for our forces. We need them back. Will you retrieve the 'Enchanted Daggers' for the Order?", action: "acceptQuest", questId: "ashAndDagger", faction: "orderOfFlame", morality: 5 },
+                        { text: "Seren: I cannot help you right now.", action: "dialogue", target: "seren_initial", morality: 0 }
+                    ],
+                    ashAndDagger_complete: [
+                        { text: "Seren: You have returned the daggers! The Order of Flame is grateful for your loyalty. Take this as a reward. (Gains Gold, Reputation, Healing Potion)", action: "completeQuest", questId: "ashAndDagger", faction: "orderOfFlame", morality: 10 },
+                        { text: "Seren: Thank you again.", action: "endDialogue", morality: 0 }
+                    ],
+                    forestQuest: [
+                        { text: "Seren: " + "The Whispering Forest has grown restless. Travelers speak of illusions and strange disappearances. Investigate the forest and find any lost souls or artifacts.", action: "acceptQuest", questId: "forestWhispers", faction: "orderOfFlame", morality: 5 },
+                        { text: "Seren: I understand. Be safe.", action: "dialogue", target: "seren_initial", morality: 0 }
+                    ],
+                    forestWhispers_complete: [
+                        { text: "Seren: You have brought peace to the Whispering Forest! Your dedication to the innocent is commendable. The Order thanks you. (Gains Gold, Reputation, Elven Bow)", action: "completeQuest", questId: "forestWhispers", faction: "orderOfFlame", morality: 10 },
+                        { text: "Seren: A true hero.", action: "endDialogue", morality: 0 }
+                    ]
+                }
+            },
+            'varric': {
+                name: 'Varric of the Hollow',
+                faction: 'shadowSyndicate',
+                description: 'A rogue trader with shifty eyes and a cynical smirk. He seems to deal in goods of questionable origin.',
+                dialogue: {
+                    initial: "Well, well. Another fresh face in this dump. Looking to buy or sell, or just passing through?",
+                    questAvailable: "Heard there's a shipment of enchanted daggers meant for the 'Lightbringers' that went missing. If you 'find' them, I'd be willing to pay a good price. Bring me the 'Enchanted Daggers'.",
+                    questInProgress: "Still looking for those daggers, eh? Don't take too long, my patience is thin.",
+                    questComplete: "Ah, the daggers! Knew you had potential. Here's your payment. Don't tell anyone where you got them.",
+                    afterQuest: "Always a pleasure doing business, friend.",
+                    eldermoorQuestAvailable: "Rumors speak of ancient artifacts hidden deep within the Ruins of Eldermoor. Bring me any 'Ancient Tome' you find there. I'll pay handsomely.",
+                    eldermoorQuestInProgress: "Still delving into Eldermoor? Don't get lost in the dust, or become one of them.",
+                    eldermoorQuestComplete: "An ancient tome! Excellent. Your discretion is appreciated. Here's your payment.",
+                    actII_virtuous: "The Veil is torn, a new opportunity. But your 'heroic' tendencies might get in the way. Be careful not to burn too brightly.",
+                    actII_corrupt: "The Veil is torn, a new opportunity. This chaos... it's good for business. Your path is clear, embrace the power!",
+                    actII_neutral: "The Veil is torn, a new opportunity. You walk your own path, and that's fine by me. Just don't get in my way."
+                },
+                choices: {
+                    initial: [
+                        { text: "Tell me about the Shadow Syndicate.", action: "dialogue", target: "varric_aboutSyndicate", morality: 0 },
+                        { text: "Do you have any work?", action: "dialogue", target: "varric_quest", morality: 0 },
+                        { text: "I'll be going.", action: "endDialogue", morality: 0 }
+                    ],
+                    varric_aboutSyndicate: [
+                        { text: "Varric: We operate in the shadows, where the 'heroes' fear to tread. Information, goods, services... we provide what others won't, for a price.", action: "dialogue", target: "varric_initial", morality: 0 }
+                    ],
+                    varric_quest: [
+                        { text: "Varric: " + "Heard there's a shipment of enchanted daggers meant for the 'Lightbringers' that went missing. If you 'find' them, I'd be willing to pay a good price. Bring me the 'Enchanted Daggers'.", action: "acceptQuest", questId: "ashAndDagger", faction: "shadowSyndicate", morality: -5 },
+                        { text: "Varric: Nothing for you then.", action: "dialogue", target: "varric_initial", morality: 0 }
+                    ],
+                    ashAndDagger_complete: [
+                        { text: "Varric: Ah, the daggers! Knew you had potential. Here's your payment. Don't tell anyone where you got them. (Gains Gold, Reputation, Mana Elixir)", action: "completeQuest", questId: "ashAndDagger", faction: "shadowSyndicate", morality: -10 },
+                        { text: "Varric: Pleasure doing business.", action: "endDialogue", morality: 0 }
+                    ],
+                    eldermoorQuest: [
+                        { text: "Varric: " + "Rumors speak of ancient artifacts hidden deep within the Ruins of Eldermoor. Bring me any 'Ancient Tome' you find there. I'll pay handsomely.", action: "acceptQuest", questId: "eldermoorSecrets", faction: "shadowSyndicate", morality: -5 },
+                        { text: "Varric: Suit yourself.", action: "dialogue", target: "varric_initial", morality: 0 }
+                    ],
+                    eldermoorSecrets_complete: [
+                        { text: "Varric: An ancient tome! Excellent. Your discretion is appreciated. Here's your payment. (Gains Gold, Reputation, Runic Plate)", action: "completeQuest", questId: "eldermoorSecrets", faction: "shadowSyndicate", morality: -10 },
+                        { text: "Varric: Another successful transaction.", action: "endDialogue", morality: 0 }
+                    ]
+                }
+            },
+            'maelin': {
+                name: 'Elder Maelin',
+                faction: 'none',
+                description: 'The oldest survivor in New Ashvale, her eyes hold the weight of the past.',
+                dialogue: {
+                    initial: "Welcome, child. It is rare to see a new face with such... potential. What troubles your mind?",
+                    questUpdates: "The ruins still hold many secrets. The obelisk, the temple... they are tied to what happened here. And the factions... they grow restless.",
+                    afterQuest: "You have recovered the spell scroll and a memory fragment. The path ahead is clearer, but more dangerous. Be wary of the factions, they have their own agendas.",
+                    actII_initial: "The Veil... it has truly torn. A new age of chaos begins, or perhaps, a new age of heroes. Your choices now will shape the very fabric of this world. What do you see as the path forward?",
+                    actII_virtuous: "Your heart is true, child. The path of light is arduous, but it is the only way to heal this broken world. The Order of Flame will guide you.",
+                    actII_corrupt: "The shadows call to you, I see. A dangerous path, full of temptations. The Shadow Syndicate may offer power, but at what cost?",
+                    actII_neutral: "You seek your own destiny, untethered by factions. A difficult, solitary path, but one that may yet bring balance."
+                },
+                choices: {
+                    initial: [
+                        { text: "Tell me about Ashvale's past.", action: "dialogue", target: "maelin_past", morality: 0 },
+                        { text: "What do you know about the factions?", action: "dialogue", target: "maelin_factions", morality: 0 },
+                        { text: "I need to go.", action: "endDialogue", morality: 0 }
+                    ],
+                    maelin_past: [
+                        { text: "Maelin: Ashvale was once a vibrant hub, until the Veil tore open. A magical cataclysm, born from forgotten rituals... it consumed everything.", action: "dialogue", target: "maelin_initial", morality: 0 }
+                    ],
+                    maelin_factions: [
+                        { text: "Maelin: The Order of Flame seeks to purify this land, to bring back the old ways. The Shadow Syndicate... they thrive in the chaos, seeking power and profit. Choose your allies wisely, for their paths diverge greatly.", action: "dialogue", target: "maelin_initial", morality: 0 }
+                    ],
+                    actII_path_choice: [
+                        { text: "I will work to restore the Veil and unite the fractured zones. (Virtuous Path)", action: "chooseNarrativePath", path: "virtuous", morality: 15, vision: "A vision of a restored Ashvale, bathed in golden light, but a faint, persistent shadow lingers." },
+                        { text: "I will exploit the chaos to gain forbidden power. (Corrupt Path)", action: "chooseNarrativePath", path: "corrupt", morality: -15, vision: "A vision of immense power, but at its core, a chilling emptiness. Figures shrouded in darkness applaud you." },
+                        { text: "I will reject both factions and forge my own destiny. (Neutral Path)", action: "chooseNarrativePath", path: "neutral", morality: 0, vision: "A vision of a solitary journey, fraught with peril, but ultimately leading to a unique destiny." }
+                    ]
+                }
+            }
+        };
+
+        const quests = {
+            'ashAndDagger': {
+                name: 'Ash and Dagger',
+                description: 'A shipment of enchanted daggers has gone missing. Seren wants them for the Order of Flame, Varric wants them for the Shadow Syndicate.',
+                status: 'notStarted', // notStarted, inProgress, completed
+                giver: null, // 'seren' or 'varric'
+                targetItem: 'enchantedDaggers',
+                rewards: {
+                    orderOfFlame: { gold: 50, reputation: { orderOfFlame: 10, shadowSyndicate: -5 }, items: [{ id: 'healingPotion', count: 1 }] },
+                    shadowSyndicate: { gold: 75, reputation: { orderOfFlame: -5, shadowSyndicate: 10 }, items: [{ id: 'manaElixir', count: 1 }] }
+                }
+            },
+            'forestWhispers': {
+                name: 'Forest Whispers',
+                description: 'Investigate the Whispering Forest for lost souls or artifacts and bring peace to the area.',
+                status: 'notStarted',
+                giver: null,
+                targetItem: null, // No specific item, quest completed by reaching shrine
+                rewards: {
+                    orderOfFlame: { gold: 80, reputation: { orderOfFlame: 15 }, items: [{ id: 'elvenBow', count: 1 }] }
+                }
+            },
+            'eldermoorSecrets': {
+                name: 'Eldermoor Secrets',
+                description: 'Retrieve an Ancient Tome from the Ruins of Eldermoor for Varric.',
+                status: 'notStarted',
+                giver: null,
+                targetItem: 'ancientTome',
+                rewards: {
+                    shadowSyndicate: { gold: 100, reputation: { shadowSyndicate: 15 }, items: [{ id: 'runicPlate', count: 1 }] }
+                }
+            }
+        };
+
+        // Combine all item types for easier lookup
+        const items = { ...weapons, ...armor, ...potions, ...questItems };
+
+        // --- Player Class Definition ---
+        /**
+         * Represents the player character with all their stats, inventory, and abilities.
+         */
+        class Player {
+            /**
+             * Creates a new Player instance.
+             * @param {string} name - The player's name.
+             * @param {string} pClass - The player's class (e.g., 'warrior', 'mage').
+             * @param {string} race - The player's race (e.g., 'human', 'elf').
+             * @param {string} origin - The player's origin story.
+             */
+            constructor(name, pClass, race, origin) {
+                this.name = name;
+                this.pClass = pClass;
+                this.race = race;
+                this.origin = origin;
+                this.level = 1;
+                this.xp = 0;
+                this.xpToNextLevel = 100;
+                this.gold = 0;
+                this.inventory = [{ id: 'healingPotion', count: 1 }];
+                this.equippedWeapon = null;
+                this.equippedArmor = null;
+                this.learnedSpells = [];
+                this.awakenedPower = null;
+                this.evolvedPower = null; // New: Tier II power
+                this.perks = [];
+                this.defenseBuff = 0;
+                this.dodgeAvailable = true;
+                this.reputation = {
+                    orderOfFlame: 0,
+                    shadowSyndicate: 0
+                };
+                this.morality = 0; // New: -100 (Corrupt) to 100 (Virtuous)
+                this.initializeStats();
+                this.equipInitialItems();
+            }
+
+            /**
+             * Initializes player stats based on chosen class, race, and origin.
+             */
+            initializeStats() {
+                const base = classes[this.pClass].baseStats;
+                const raceBonus = races[this.race].statBonus;
+                const originBonus = origins[this.origin].statBonus;
+
+                this.maxHp = base.hp + (raceBonus.hp || 0) + (originBonus.hp || 0);
+                this.currentHp = this.maxHp;
+                this.maxMana = base.mana + (raceBonus.mana || 0) + (originBonus.mana || 0);
+                this.currentMana = this.maxMana;
+                this.strength = base.strength + (raceBonus.strength || 0) + (originBonus.strength || 0);
+                this.intelligence = base.intelligence + (raceBonus.intelligence || 0) + (originBonus.intelligence || 0);
+                this.dexterity = base.dexterity + (raceBonus.dexterity || 0) + (originBonus.dexterity || 0);
+            }
+
+            /**
+             * Equips starting items based on the player's class.
+             */
+            equipInitialItems() {
+                if (this.pClass === 'warrior') {
+                    this.equipItem('rustyShortSword');
+                    this.equipItem('crudeShield');
+                } else if (this.pClass === 'mage') {
+                    this.equipItem('woodenStaff');
+                    this.equipItem('tatteredRobe');
+                } else if (this.pClass === 'rogue') {
+                    this.equipItem('wornLeatherDagger');
+                    this.equipItem('leatherVest');
+                }
+            }
+
+            /**
+             * Increases player's experience points and handles level up.
+             * @param {number} amount - The amount of XP to gain.
+             */
+            gainXP(amount) {
+                let actualAmount = amount;
+                if (this.awakenedPower === 'echoofages') {
+                    actualAmount = Math.floor(amount * (this.perks.includes('upgradeEchoOfAges') ? 1.35 : 1.2));
+                    if (verboseMode) displayMessage(`(Echo of Ages) Gained ${actualAmount} XP (base ${amount})!`);
+                } else {
+                    if (verboseMode) displayMessage(`You gained ${actualAmount} XP!`);
+                }
+
+                this.xp += actualAmount;
+                if (this.xp >= this.xpToNextLevel) {
+                    this.levelUp();
+                }
+                displayStats();
+            }
+
+            /**
+             * Handles player leveling up, increasing stats and prompting for perks/evolved powers.
+             */
+            levelUp() {
+                this.level++;
+                displayMessage(`\n*** You leveled up! You are now Level ${this.level}! ***`);
+                this.xp -= this.xpToNextLevel;
+                this.xpToNextLevel = Math.floor(this.xpToNextLevel * 1.5);
+
+                switch (this.pClass) {
+                    case 'warrior':
+                        this.maxHp += 20; this.strength += 3; this.dexterity += 1; this.maxMana += 5; break;
+                    case 'mage':
+                        this.maxMana += 25; this.intelligence += 3; this.dexterity += 1; this.maxHp += 10; break;
+                    case 'rogue':
+                        this.maxHp += 15; this.strength += 2; this.intelligence += 1; this.dexterity += 3; this.maxMana += 10; break;
+                }
+                this.currentHp = this.maxHp;
+                this.currentMana = this.maxMana;
+                displayMessage(`Your base stats have increased!`);
+                displayStats();
+
+                // Check for Act II trigger after level up
+                checkActIITrigger();
+
+                if (this.level >= 5 && !this.evolvedPower) {
+                    chooseEvolvedPower(); // Unlock evolved power quest at Level 5
+                } else {
+                    chooseLevelUpPerk(); // Prompt for perk choice
+                }
+            }
+
+            /**
+             * Calculates and applies damage to the player, considering defense and dodge.
+             * @param {number} amount - The base damage amount.
+             */
+            takeDamage(amount) {
+                let effectiveDefense = this.defenseBuff;
+                if (this.equippedArmor) {
+                    effectiveDefense += armor[this.equippedArmor].defenseBonus;
+                }
+
+                let finalDamage = amount - effectiveDefense;
+                if (finalDamage < 0) finalDamage = 0;
+
+                // Fadewalk (Evolved Shadowstep) effect
+                if (this.evolvedPower === 'fadewalk' && bossFightState.fadewalkActive) {
+                    displayMessage('You are completely ethereal, evading all damage!');
+                    bossFightState.fadewalkActive = false; // Consume Fadewalk
+                    return;
+                }
+
+                // Shadowstep (base power) effect
+                if (this.awakenedPower === 'shadowstep' && this.dodgeAvailable && Math.random() < (this.perks.includes('upgradeShadowstep') ? 0.45 : 0.3)) {
+                    displayMessage('You deftly Shadowstep, dodging the attack!');
+                    this.dodgeAvailable = false;
+                    return;
+                }
+
+                this.currentHp -= finalDamage;
+                if (this.currentHp < 0) this.currentHp = 0;
+                displayMessage(`${this.name} took ${Math.floor(finalDamage)} damage.`);
+                displayStats();
+            }
+
+            /**
+             * Heals the player's current HP.
+             * @param {number} amount - The amount of HP to restore.
+             */
+            heal(amount) {
+                this.currentHp += amount;
+                if (this.currentHp > this.maxHp) this.currentHp = this.maxHp;
+                displayMessage(`${this.name} healed for ${amount} HP.`);
+                displayStats();
+            }
+
+            /**
+             * Consumes player's mana.
+             * @param {number} amount - The amount of mana to consume.
+             */
+            useMana(amount) {
+                this.currentMana -= amount;
+                if (this.currentMana < 0) this.currentMana = 0;
+                displayStats();
+            }
+
+            /**
+             * Restores player's mana.
+             * @param {number} amount - The amount of mana to restore.
+             */
+            restoreMana(amount) {
+                this.currentMana += amount;
+                if (this.currentMana > this.maxMana) this.currentMana = this.maxMana;
+                displayStats();
+            }
+
+            /**
+             * Adds a spell to the player's learned spells.
+             * @param {string} spellId - The ID of the spell to learn.
+             */
+            learnSpell(spellId) {
+                if (!this.learnedSpells.includes(spellId)) {
+                    this.learnedSpells.push(spellId);
+                    displayMessage(`You learned the spell: ${spells[spellId].name}!`);
+                }
+            }
+
+            /**
+             * Sets the player's awakened power.
+             * @param {string} powerId - The ID of the awakened power.
+             */
+            setAwakenedPower(powerId) {
+                this.awakenedPower = powerId;
+                displayMessage(`You have awakened the power: ${powers[powerId].name}!`);
+            }
+
+            /**
+             * Sets the player's evolved power.
+             * @param {string} evolvedPowerId - The ID of the evolved power.
+             */
+            setEvolvedPower(evolvedPowerId) {
+                this.evolvedPower = evolvedPowerId;
+                displayMessage(`Your power has evolved into: ${evolvedPowers[evolvedPowerId].name}!`);
+            }
+
+            /**
+             * Adds a perk to the player's list of perks.
+             * @param {string} perkId - The ID of the perk to add.
+             */
+            addPerk(perkId) {
+                if (!this.perks.includes(perkId)) {
+                    this.perks.push(perkId);
+                    const perk = perks[perkId];
+                    displayMessage(`You gained the perk: ${perk.name}!`);
+                    if (perk.type === 'stat') {
+                        this[perk.stat] += perk.amount;
+                        displayMessage(`Your ${perk.stat} increased by ${perk.amount}!`);
+                    }
+                    displayStats();
+                }
+            }
+
+            /**
+             * Adds an item to the player's inventory.
+             * @param {string} itemId - The ID of the item to add.
+             * @param {number} [count=1] - The number of items to add.
+             */
+            addItem(itemId, count = 1) {
+                const existingItem = this.inventory.find(item => item.id === itemId);
+                if (existingItem) {
+                    existingItem.count += count;
+                } else {
+                    this.inventory.push({ id: itemId, count: count });
+                }
+                displayMessage(`You obtained ${count}x ${items[itemId].name || itemId}!`);
+                displayStats();
+            }
+
+            /**
+             * Removes an item from the player's inventory.
+             * @param {string} itemId - The ID of the item to remove.
+             * @param {number} [count=1] - The number of items to remove.
+             * @returns {boolean} - True if item was removed, false otherwise.
+             */
+            removeItem(itemId, count = 1) {
+                const itemIndex = this.inventory.findIndex(item => item.id === itemId);
+                if (itemIndex !== -1) {
+                    this.inventory[itemIndex].count -= count;
+                    if (this.inventory[itemIndex].count <= 0) {
+                        this.inventory.splice(itemIndex, 1);
+                    }
+                    displayStats();
+                    return true;
+                }
+                return false;
+            }
+
+            /**
+             * Equips a weapon or armor item.
+             * @param {string} itemId - The ID of the item to equip.
+             */
+            equipItem(itemId) {
+                const item = items[itemId];
+                if (!item) {
+                    displayMessage(`You don't have a ${itemId} to equip.`);
+                    return;
+                }
+
+                if (item.type === 'weapon') {
+                    if (this.equippedWeapon) {
+                        this.addItem(this.equippedWeapon);
+                        displayMessage(`You unequipped ${items[this.equippedWeapon].name}.`);
+                    }
+                    this.equippedWeapon = itemId;
+                    displayMessage(`You equipped ${item.name}.`);
+                } else if (item.type === 'armor') {
+                    if (this.equippedArmor) {
+                        this.addItem(this.equippedArmor);
+                        displayMessage(`You unequipped ${items[this.equippedArmor].name}.`);
+                    }
+                    this.equippedArmor = itemId;
+                    displayMessage(`You equipped ${item.name}.`);
+                } else {
+                    displayMessage(`You cannot equip ${item.name}.`);
+                }
+                displayStats();
+            }
+
+            /**
+             * Increases player's gold.
+             * @param {number} amount - The amount of gold to gain.
+             */
+            gainGold(amount) {
+                this.gold += amount;
+                displayMessage(`You gained ${amount} gold! Total: ${this.gold}`);
+                displayStats();
+            }
+
+            /**
+             * Decreases player's gold.
+             * @param {number} amount - The amount of gold to lose.
+             * @returns {boolean} - True if gold was lost, false otherwise.
+             */
+            loseGold(amount) {
+                if (this.gold >= amount) {
+                    this.gold -= amount;
+                    displayMessage(`You spent ${amount} gold! Remaining: ${this.gold}`);
+                    displayStats();
+                    return true;
+                } else {
+                    displayMessage('Not enough gold!');
+                    return false;
+                }
+            }
+
+            /**
+             * Adjusts player's reputation with a specific faction.
+             * @param {string} faction - The ID of the faction.
+             * @param {number} amount - The amount to adjust reputation by.
+             */
+            adjustReputation(faction, amount) {
+                this.reputation[faction] += amount;
+                displayMessage(`Your reputation with ${faction.replace(/([A-Z])/g, ' $1').trim()} changed by ${amount}. Current: ${this.reputation[faction]}`);
+                displayStats();
+            }
+
+            /**
+             * Adjusts player's morality.
+             * @param {number} amount - The amount to adjust morality by. Positive for virtuous, negative for corrupt.
+             */
+            adjustMorality(amount) {
+                this.morality += amount;
+                if (this.morality > 100) this.morality = 100;
+                if (this.morality < -100) this.morality = -100;
+                let moralityStatus = 'Neutral';
+                if (this.morality > 20) moralityStatus = 'Virtuous';
+                else if (this.morality < -20) moralityStatus = 'Corrupt';
+                displayMessage(`Your morality shifted. Current: ${moralityStatus} (${this.morality})`);
+                displayStats();
+            }
+        }
+
+        // --- Core Game Functions ---
+
+        /**
+         * Initializes the game by setting up DOM elements and starting character creation.
+         */
+        function initGame() {
+            gameOutput = document.getElementById('game-output');
+            gameInput = document.getElementById('game-input');
+            submitButton = document.getElementById('submit-button');
+            gameStats = document.getElementById('game-stats');
+            choiceButtonsContainer = document.getElementById('choice-buttons');
+
+            submitButton.addEventListener('click', handleInput);
+            gameInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    handleInput();
+                }
+            });
+
+            displayMessage("Welcome, adventurer, to 'The Lost Artifact'!");
+            startCharacterCreation();
+        }
+
+        /**
+         * Displays a message in the game output area.
+         * @param {string} message - The message to display.
+         */
+        function displayMessage(message) {
+            gameOutput.innerHTML += `<p>${message}</p>`;
+            gameOutput.scrollTop = gameOutput.scrollHeight;
+        }
+
+        /**
+         * Updates the player stats display.
+         */
+        function displayStats() {
+            if (!player) {
+                gameStats.innerHTML = 'Loading stats...';
+                return;
+            }
+            let moralityStatus = 'Neutral';
+            if (player.morality > 20) moralityStatus = 'Virtuous';
+            else if (player.morality < -20) moralityStatus = 'Corrupt';
+
+            gameStats.innerHTML = `
+                <div><strong>Name:</strong> ${player.name}</div>
+                <div><strong>Class:</strong> ${player.pClass.charAt(0).toUpperCase() + player.pClass.slice(1)}</div>
+                <div><strong>Race:</strong> ${player.race.charAt(0).toUpperCase() + player.race.slice(1)}</div>
+                <div><strong>Origin:</strong> ${player.origin ? origins[player.origin].description.split('.')[0] : 'N/A'}</div>
+                <div><strong>Level:</strong> ${player.level} (XP: ${player.xp}/${player.xpToNextLevel})</div>
+                <div><strong>HP:</strong> ${player.currentHp}/${player.maxHp}</div>
+                <div><strong>Mana:</strong> ${player.currentMana}/${player.maxMana}</div>
+                <div><strong>Strength:</strong> ${player.strength}</div>
+                <div><strong>Intelligence:</strong> ${player.intelligence}</div>
+                <div><strong>Dexterity:</strong> ${player.dexterity}</div>
+                <div><strong>Gold:</strong> ${player.gold}</div>
+                <div class="col-span-2"><strong>Equipped Weapon:</strong> ${player.equippedWeapon ? items[player.equippedWeapon].name : 'None'}</div>
+                <div class="col-span-2"><strong>Equipped Armor:</strong> ${player.equippedArmor ? items[player.equippedArmor].name : 'None'}</div>
+                <div class="col-span-2"><strong>Spells:</strong> ${player.learnedSpells.map(s => spells[s].name).join(', ') || 'None'}</div>
+                <div class="col-span-2"><strong>Awakened Power:</strong> ${player.awakenedPower ? powers[player.awakenedPower].name : 'None'}</div>
+                <div class="col-span-2"><strong>Evolved Power:</strong> ${player.evolvedPower ? evolvedPowers[player.evolvedPower].name : 'None'}</div>
+                <div class="col-span-2"><strong>Perks:</strong> ${player.perks.map(p => perks[p].name).join(', ') || 'None'}</div>
+                <div class="col-span-2"><strong>Reputation:</strong> Order of Flame: ${player.reputation.orderOfFlame}, Shadow Syndicate: ${player.reputation.shadowSyndicate}</div>
+                <div class="col-span-2"><strong>Morality:</strong> ${moralityStatus} (${player.morality})</div>
+                <div class="col-span-2"><strong>Chosen Path:</strong> ${worldState.chosenPath ? worldState.chosenPath.charAt(0).toUpperCase() + worldState.chosenPath.slice(1) : 'None'}</div>
+            `;
+        }
+
+        /**
+         * Presents a list of choices to the player and creates corresponding buttons.
+         * @param {Array<Object>} choices - An array of choice objects {text: string, action: string, ...}.
+         * @param {string} placeholder - Placeholder text for the input field.
+         * @param {string} buttonText - Text for the submit button.
+         */
+        function presentChoices(choices, placeholder, buttonText) {
+            clearChoiceButtons();
+            choices.forEach((choice, index) => {
+                displayMessage(`${index + 1}. ${choice.text}`);
+                createChoiceButton(index + 1, choice.text, choice.action, choice.target, choice.questId, choice.faction, choice.morality, choice.path, choice.vision);
+            });
+            gameInput.placeholder = placeholder;
+            submitButton.textContent = buttonText;
+            gameInput.focus();
+        }
+
+        /**
+         * Handles common commands like inventory, use, look, and travel.
+         * @param {string} input - The player's input.
+         * @returns {boolean} - True if a common command was handled, false otherwise.
+         */
+        function handleCommonCommands(input) {
+            if (input === 'inventory' || input === 'i') {
+                viewInventory();
+                return true;
+            }
+            if (input.startsWith('use ')) {
+                const itemToUse = input.substring(4).trim();
+                useItem(itemToUse);
+                return true;
+            }
+            if (input === 'look' || input === 'l') {
+                enterLocation(currentScene);
+                return true;
+            }
+            if (input.startsWith('travel to ')) {
+                const targetRegion = input.substring(10).trim();
+                handleTravelCommand(targetRegion);
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * Creates a clickable button for a choice.
+         * @param {number} choiceNumber - The number associated with the choice.
+         * @param {string} text - The text to display on the button.
+         * @param {...any} args - Additional arguments to pass to the event listener.
+         */
+        function createChoiceButton(choiceNumber, text, ...args) {
+            const button = document.createElement('button');
+            button.className = 'choice-button';
+            button.textContent = `${choiceNumber}. ${text}`;
+            button.dataset.choice = choiceNumber;
+            // Store additional data for later use in handleInput if needed
+            if (args.length > 0) {
+                button.dataset.action = args[0];
+                if (args[1]) button.dataset.target = args[1];
+                if (args[2]) button.dataset.questId = args[2];
+                if (args[3]) button.dataset.faction = args[3];
+                if (args[4] !== undefined) button.dataset.morality = args[4];
+                if (args[5]) button.dataset.path = args[5];
+                if (args[6]) button.dataset.vision = args[6];
+            }
+
+            button.addEventListener('click', () => {
+                gameInput.value = choiceNumber;
+                handleInput();
+            });
+            choiceButtonsContainer.appendChild(button);
+        }
+
+        /**
+         * Clears all dynamically created choice buttons.
+         */
+        function clearChoiceButtons() {
+            choiceButtonsContainer.innerHTML = '';
+        }
+
+        /**
+         * Ends the game.
+         */
+        function gameOver() {
+            gameState = 'gameOver';
+            displayMessage('\n--- GAME OVER ---');
+            displayMessage('Your adventure has ended. You fought bravely, but ultimately succumbed to the dangers of this world.');
+            displayMessage('Refresh the page to play again.');
+            gameInput.disabled = true;
+            submitButton.disabled = true;
+            clearChoiceButtons();
+        }
+
+        // --- Character Creation Module ---
+        /**
+         * Starts the character creation process.
+         */
+        function startCharacterCreation() {
+            gameState = 'characterCreation';
+            displayMessage('\nFirst, tell me about your hero.');
+            displayMessage('What is your hero\'s name?');
+            presentChoices([], 'Enter name...', 'Confirm Name');
+        }
+
+        /**
+         * Prompts the player to choose a class.
+         */
+        function chooseClass() {
+            displayMessage('\nChoose your hero\'s class:');
+            const classChoices = Object.keys(classes).map((cls, i) => ({
+                text: `${cls.charAt(0).toUpperCase() + cls.slice(1)} - ${classes[cls].description}`,
+                value: i + 1
+            }));
+            presentChoices(classChoices, 'Type class number (e.g., 1 for Warrior)...', 'Confirm Class');
+        }
+
+        /**
+         * Prompts the player to choose a race.
+         */
+        function chooseRace() {
+            displayMessage('\nChoose your hero\'s race:');
+            const raceChoices = Object.keys(races).map((rce, i) => ({
+                text: `${rce.charAt(0).toUpperCase() + rce.slice(1)} - ${races[rce].description}`,
+                value: i + 1
+            }));
+            presentChoices(raceChoices, 'Type race number (e.g., 1 for Human)...', 'Confirm Race');
+        }
+
+        /**
+         * Prompts the player to choose an origin.
+         */
+        function chooseOrigin() {
+            displayMessage('\nFinally, choose your hero\'s origin:');
+            const originChoices = Object.keys(origins).map((org, i) => ({
+                text: `${org.charAt(0).toUpperCase() + org.slice(1)} - ${origins[org].description}`,
+                value: i + 1
+            }));
+            presentChoices(originChoices, 'Type origin number (e.g., 1 for Orphan)...', 'Confirm Origin');
+        }
+
+        /**
+         * Handles input during character creation.
+         * @param {string} input - The player's input.
+         */
+        function handleCharacterCreationInput(input) {
+            if (!player || !player.name) {
+                player = { name: input };
+                chooseClass();
+            } else if (!player.pClass) {
+                const classKeys = Object.keys(classes);
+                const choiceIndex = parseInt(input) - 1;
+                if (choiceIndex >= 0 && choiceIndex < classKeys.length) {
+                    player.pClass = classKeys[choiceIndex];
+                    chooseRace();
+                } else {
+                    displayMessage('Invalid class choice. Please choose a number from the list.');
+                }
+            } else if (!player.race) {
+                const raceKeys = Object.keys(races);
+                const choiceIndex = parseInt(input) - 1;
+                if (choiceIndex >= 0 && choiceIndex < raceKeys.length) {
+                    player.race = raceKeys[choiceIndex];
+                    chooseOrigin();
+                } else {
+                    displayMessage('Invalid race choice. Please choose a number from the list.');
+                }
+            } else if (!player.origin) {
+                const originKeys = Object.keys(origins);
+                const choiceIndex = parseInt(input) - 1;
+                if (choiceIndex >= 0 && choiceIndex < originKeys.length) {
+                    player.origin = originKeys[choiceIndex];
+                    player = new Player(player.name, player.pClass, player.race, player.origin);
+                    displayMessage(`\nWelcome, ${player.name} the ${player.race.charAt(0).toUpperCase() + player.race.slice(1)} ${player.pClass.charAt(0).toUpperCase() + player.pClass.slice(1)}!`);
+                    displayStats();
+                    startGameIntro();
+                } else {
+                    displayMessage('Invalid origin choice. Please choose a number from the list.');
+                }
+            }
+        }
+
+        /**
+         * Starts the game's introductory story and initializes quest/world states.
+         */
+        function startGameIntro() {
+            gameState = 'intro';
+            displayMessage('\n--- The Awakening in Ashvale ---');
+            displayMessage('You stir, a dull ache throbbing behind your eyes. Disorientation is your only companion as you slowly open them to a world of dust and ruin. Charred timbers and collapsed roofs stretch around you, the skeletal remains of what was once Ashvale, a once-thriving village now consumed by a magical catastrophe.');
+            displayMessage('Beside you, a scorched obelisk stands eerily, its surface etched with a glowing, unfamiliar sigil. As you gaze at it, a voice whispers directly into your mind, chilling you to the bone: "You must remember who you are... or all will be lost."');
+            displayMessage('Your hand brushes against something cold and smooth beside you. It\'s a small, intricately carved stone, glowing faintly with an inner light. This "Mysterious Artifact" is the only thing you possess, a silent testament to a forgotten past.');
+
+            displayMessage('\nAs you try to process this, a translucent, shimmering figure coalesces before you – a ghostly villager, their eyes filled with an ancient sorrow.');
+            displayMessage('"Stranger," the spectral voice echoes, "the catastrophe that befell Ashvale stole our memories, our very essence. I am but an echo. If you seek to understand this place, and perhaps yourself, you must recover the fragments of memory scattered within these ruins. Begin by searching the village temple to the west. A powerful spell scroll, vital to understanding the sigil, lies hidden there. This is your first quest: Embers of Memory."');
+
+            questState = {
+                embersOfMemory: { started: true, foundMemoryFragment1: false, foundSpellScroll: false, defeatedSpirit: false, completed: false },
+                ashAndDagger: { status: 'notStarted', giver: null },
+                forestWhispers: { status: 'notStarted', giver: null },
+                eldermoorSecrets: { status: 'notStarted', giver: null }
+            };
+
+            worldState = {
+                shrine_found: false,
+                ancient_tome_found: false,
+                bandit_spared: false,
+                traveler_helped: false,
+                trap_disarmed: false,
+                actII_triggered: false, // New: Flag for Act II trigger
+                chosenPath: null // New: To store the player's chosen narrative path (virtuous, corrupt, neutral)
+            };
+
+
+            enterLocation('ashvaleRuins');
+        }
+
+        /**
+         * Handles input during the intro sequence.
+         * @param {string} input - The player's input.
+         */
+        function handleIntroInput(input) {
+            displayMessage('The initial awakening is complete. You are now in Ashvale Ruins.');
+            enterLocation('ashvaleRuins');
+        }
+
+        // --- Exploration and Location Management Module ---
+        /**
+         * Displays the current location and its choices.
+         * @param {string} locationId - The ID of the location to enter.
+         */
+        function enterLocation(locationId) {
+            currentScene = locationId;
+            const location = locations[locationId];
+            if (!location) {
+                displayMessage('You find yourself in an unknown place. This is a bug!');
+                return;
+            }
+
+            gameState = 'exploration';
+            if (locationId === 'newAshvale') {
+                gameState = 'town';
+            } else if (locationId === 'eldermoorKeep' || locationId === 'lavaChamber') {
+                if (locationId === 'eldermoorKeep' && !worldState.hollowKnight_defeated) {
+                    displayMessage("\nAs you step into the Eldermoor Keep, a chilling presence fills the air. The spectral form of The Hollow Knight materializes before you!");
+                    startBossCombat('hollowKnight');
+                    return;
+                }
+                if (locationId === 'lavaChamber' && !worldState.ashwyrm_defeated) {
+                    displayMessage("\nThe Great Lava Chamber trembles as a colossal Ashwyrm, the Flame Warden, emerges from the molten depths!");
+                    startBossCombat('ashwyrm');
+                    return;
+                }
+            }
+
+
+            displayMessage(`\n--- ${location.name} ---`);
+            displayMessage(location.description);
+
+            const currentChoices = location.choices.filter(choice => {
+                let display = true;
+                if (choice.action === 'searchTempleAltar' && questState.embersOfMemory.foundSpellScroll) display = false;
+                if (choice.action === 'investigateObelisk' && questState.embersOfMemory.foundMemoryFragment1) display = false;
+                if (choice.action === 'explore' && choice.target === 'ancientVault' && !locations.villageTemple.choices.some(c => c.action === 'explore' && c.target === 'ancientVault')) display = false;
+                if (choice.action === 'approachShrine' && worldState.shrine_found) display = false;
+                if (choice.action === 'searchLibrary' && worldState.ancient_tome_found) display = false;
+
+                // Hide Act II regions until triggered
+                if (['veilscarCrater', 'riftEdge', 'templeOfShatteredOath'].includes(choice.target) && !worldState.actII_triggered) {
+                    display = false;
+                }
+                return display;
+            });
+
+            presentChoices(currentChoices, 'Type "look", "inventory", "use [item]", "travel to [region]", or choice number...', 'Make Choice');
+
+            // Trigger dynamic encounters only in Ashvale Ruins and if not in combat or town
+            if (currentScene === 'ashvaleRuins' && !currentEnemy && gameState !== 'town') {
+                triggerRandomEncounter();
+            }
+            displayStats();
+        }
+
+        /**
+         * Handles input during exploration.
+         * @param {string} input - The player's input.
+         */
+        function handleExplorationInput(input) {
+            if (handleCommonCommands(input)) return;
+
+            const location = locations[currentScene];
+            const choiceIndex = parseInt(input) - 1;
+
+            if (choiceIndex >= 0 && choiceIndex < location.choices.length) {
+                const choice = location.choices[choiceIndex];
+                switch (choice.action) {
+                    case 'explore':
+                        enterLocation(choice.target);
+                        break;
+                    case 'combat':
+                        initiateCombat(choice.target);
+                        break;
+                    case 'investigateObelisk':
+                        if (!questState.embersOfMemory.foundMemoryFragment1) {
+                            displayMessage('You touch the glowing sigil on the scorched obelisk. A jolt of energy courses through you, and a fragmented image flashes in your mind: a bustling market, a laughing child, a warm embrace. It\'s a memory, but not your own. You feel a slight increase in your understanding. (Intelligence +1)');
+                            player.intelligence += 1;
+                            questState.embersOfMemory.foundMemoryFragment1 = true;
+                            displayStats();
+                        } else {
+                            displayMessage('The obelisk still hums, but offers no new memories.');
+                        }
+                        enterLocation(currentScene);
+                        break;
+                    case 'searchTempleAltar':
+                        if (!questState.embersOfMemory.foundSpellScroll) {
+                            displayMessage('You carefully search the ruined altar. Beneath a pile of rubble, you uncover a rolled-up, ancient parchment. It\'s the "Emberbolt Spell Scroll"!');
+                            player.addItem('emberboltSpellScroll');
+                            player.learnSpell('emberbolt');
+                            questState.embersOfMemory.foundSpellScroll = true;
+                            displayStats();
+                            initiateCombat('corruptedSpirit');
+                        } else {
+                            displayMessage('You\'ve already found what was here. The altar is empty.');
+                            enterLocation(currentScene);
+                        }
+                        break;
+                    case 'examineStatues':
+                        displayMessage('You examine the fallen statues. They depict ancient heroes, their faces worn by time. One seems to be holding a small, unreadable tablet. You try to decipher it, but it\'s too faded. Perhaps Mind Echo could help?');
+                        if (player.learnedSpells.includes('mindecho')) {
+                            presentChoices([
+                                { text: 'Try to use Mind Echo on the tablet.', action: 'useMindEchoOnTablet' },
+                                { text: 'Leave the statues.', action: 'leaveStatues' }
+                            ], 'Type choice number...', 'Choose Action');
+                            gameState = 'quest1';
+                            questState.currentEncounter = 'statueTablet';
+                        } else {
+                            enterLocation(currentScene);
+                        }
+                        break;
+                    case 'searchForest':
+                        displayMessage('You wander deeper into the forest, getting a bit lost. You find a patch of glowing mushrooms. Eating one restores some mana! (+15 Mana)');
+                        player.restoreMana(15);
+                        displayStats();
+                        enterLocation(currentScene);
+                        break;
+                    case 'investigateStream':
+                        displayMessage('You kneel by the stream. The water is crystal clear and refreshing. You drink deeply, feeling invigorated. (+10 HP)');
+                        player.heal(10);
+                        displayStats();
+                        enterLocation(currentScene);
+                        break;
+                    case 'searchTracks':
+                        displayMessage('You find large paw prints, too big for a normal wolf. They lead deeper into the forest, hinting at something dangerous.');
+                        displayMessage('You feel a sense of dread. Perhaps it\'s best not to follow them right now.');
+                        enterLocation(currentScene);
+                        break;
+                    case 'searchPeak':
+                        displayMessage('From the peak, you spot a faint, shimmering light in the distance, far to the west. It\'s too far to discern, but it sparks your curiosity.');
+                        displayMessage('You note its direction, perhaps for future exploration.');
+                        enterLocation(currentScene);
+                        break;
+                    case 'approachShrine':
+                        handleApproachShrine();
+                        break;
+                    case 'searchWhisperingForest':
+                        displayMessage('You delve deeper into the whispering woods, the illusions growing stronger. You find a hidden cache of supplies: a Healing Potion and a Mana Elixir!');
+                        player.addItem('healingPotion');
+                        player.addItem('manaElixir');
+                        displayStats();
+                        enterLocation(currentScene);
+                        break;
+                    case 'investigateBarracks':
+                        displayMessage('You cautiously enter the ruined barracks. The air is thick with the dust of ages. You find a sturdy Leather Vest amidst some rubble.');
+                        player.addItem('leatherVest');
+                        displayStats();
+                        enterLocation(currentScene);
+                        break;
+                    case 'searchLibrary':
+                        handleSearchLibrary();
+                        break;
+                    case 'exploreDungeonCells':
+                        displayMessage('You carefully explore the dungeon cells. Most are empty, but in one, you find a hidden compartment containing an Iron Sword!');
+                        player.addItem('ironSword');
+                        displayStats();
+                        enterLocation(currentScene);
+                        break;
+                    case 'mineMinerals':
+                        displayMessage('You find a rich vein of glowing ore in the cavern wall. After some effort, you extract a valuable Fire Crystal!');
+                        player.addItem('fireCrystal');
+                        player.gainGold(50);
+                        displayStats();
+                        enterLocation(currentScene);
+                        break;
+                    case 'findPath':
+                        displayMessage('You carefully navigate the treacherous edges of the lava chamber, finding a safer path forward. You feel a surge of determination. (Dexterity +1)');
+                        player.dexterity += 1;
+                        displayStats();
+                        enterLocation(currentScene);
+                        break;
+                    case 'searchCrater':
+                        displayMessage('You cautiously search the fractured landscape of the Veilscar Crater. The ground hums with raw magic. You find some corrupted remnants, but nothing immediately useful. The danger here is palpable.');
+                        enterLocation(currentScene);
+                        break;
+                    case 'investigateShatteredAltar':
+                        displayMessage('You approach the shattered altar. It radiates a faint, sorrowful energy. You feel a sense of ancient betrayal. (Morality check: If virtuous, gain insight; if corrupt, gain dark knowledge).');
+                        if (player.morality > 20) {
+                            displayMessage('Your virtuous spirit resonates with the altar\'s sorrow. You gain insight into the temple\'s past. (Intelligence +2)');
+                            player.intelligence += 2;
+                        } else if (player.morality < -20) {
+                            displayMessage('Your corrupt nature draws dark knowledge from the altar. You feel a surge of power. (Strength +2)');
+                            player.strength += 2;
+                        } else {
+                            displayMessage('The altar remains silent, its secrets beyond your current understanding.');
+                        }
+                        displayStats();
+                        enterLocation(currentScene);
+                        break;
+                    case 'examineGuardianStatues':
+                        displayMessage('You examine the broken guardian statues. Their forms are noble, but their purpose seems lost. You sense a lingering oath, shattered by some ancient event.');
+                        enterLocation(currentScene);
+                        break;
+                    case 'stabilizeVeil':
+                        handleChooseNarrativePath('virtuous');
+                        break;
+                    case 'drawPowerFromVeil':
+                        handleChooseNarrativePath('corrupt');
+                        break;
+                    case 'observeVeil':
+                        handleChooseNarrativePath('neutral');
+                        break;
+                    default:
+                        displayMessage('You attempt an action, but nothing happens. Perhaps that choice is not yet implemented.');
+                        enterLocation(currentScene);
+                        break;
+                }
+            } else {
+                displayMessage('Invalid choice. Please type the number corresponding to your desired action, or "inventory", "use [item]", "look", "travel to [region]".');
+            }
+
+            checkEmbersOfMemoryQuestCompletion();
+        }
+
+        /**
+         * Handles the specific action of approaching the shrine in Forest Heart.
+         */
+        function handleApproachShrine() {
+            if (!worldState.shrine_found) {
+                displayMessage('You approach the glowing shrine. As you touch its ancient stone, a wave of pure energy washes over you, filling you with renewed vigor and clarity. (Permanent +2 to all stats!)');
+                player.strength += 2;
+                player.intelligence += 2;
+                player.dexterity += 2;
+                player.maxHp += 10;
+                player.maxMana += 10;
+                player.currentHp = player.maxHp;
+                player.currentMana = player.maxMana;
+                worldState.shrine_found = true;
+                displayStats();
+            } else {
+                displayMessage('The shrine still glows, but its power has already been imparted to you.');
+            }
+            enterLocation(currentScene);
+        }
+
+        /**
+         * Handles the specific action of searching the library in Eldermoor Keep.
+         */
+        function handleSearchLibrary() {
+            if (!worldState.ancient_tome_found) {
+                displayMessage('You search the remains of the Eldermoor library. Amidst the decaying scrolls, you find a heavy, leather-bound book: an "Ancient Tome". It hums with faint magic.');
+                player.addItem('ancientTome');
+                worldState.ancient_tome_found = true;
+                displayStats();
+            } else {
+                displayMessage('You\'ve already thoroughly searched the library. There\'s nothing new here.');
+            }
+            enterLocation(currentScene);
+        }
+
+        // --- Dynamic Encounter Handlers ---
+        /**
+         * Handles input during dynamic quest encounters (e.g., wounded traveler, bandit).
+         * @param {string} input - The player's input.
+         */
+        function handleQuest1Input(input) {
+            const choice = parseInt(input);
+            switch (questState.currentEncounter) {
+                case 'statueTablet':
+                    handleStatueTabletEncounter(choice);
+                    break;
+                case 'woundedTraveler':
+                    handleWoundedTravelerEncounter(choice);
+                    break;
+                case 'ancientRune':
+                    handleAncientRuneEncounter(choice);
+                    break;
+                case 'disarmTrap':
+                    handleDisarmTrapEncounter(choice);
+                    break;
+                case 'banditEncounter':
+                    handleBanditEncounter(choice);
+                    break;
+                default:
+                    displayMessage('An unexpected encounter state occurred.');
+                    enterLocation(currentScene);
+                    break;
+            }
+        }
+
+        /**
+         * Handles the statue tablet encounter logic.
+         * @param {number} choice - The player's choice.
+         */
+        function handleStatueTabletEncounter(choice) {
+            if (choice === 1) {
+                if (player.currentMana >= spells.mindecho.cost) {
+                    player.useMana(spells.mindecho.cost);
+                    displayMessage('You focus your mind, casting Mind Echo upon the tablet. The faded symbols glow, and a vision fills your mind: a map, showing a hidden passage beneath the temple leading to an ancient vault!');
+                    displayMessage('You feel a surge of insight. (Intelligence +1)');
+                    player.intelligence += 1;
+                    player.learnSpell('wardlight');
+                    displayStats();
+                    locations.villageTemple.choices.push({ text: 'Find the hidden passage (requires Mind Echo insight)', action: 'explore', target: 'ancientVault' });
+                    displayMessage('A new path has opened in the Ruined Temple!');
+                } else {
+                    displayMessage('You do not have enough mana to cast Mind Echo.');
+                }
+            } else if (choice === 2) {
+                displayMessage('You decide to leave the statues for now.');
+            } else {
+                displayMessage('Invalid choice.');
+            }
+            questState.currentEncounter = null;
+            enterLocation(currentScene);
+        }
+
+        /**
+         * Handles the wounded traveler encounter logic.
+         * @param {number} choice - The player's choice.
+         */
+        function handleWoundedTravelerEncounter(choice) {
+            if (choice === 1) {
+                displayMessage('You offer to help the wounded traveler. They gratefully accept, and you tend to their wounds. "Thank you, kind stranger," they say. "May your path be blessed." You feel a sense of moral satisfaction. (Gain 5 XP, +1 Intelligence)');
+                player.gainXP(5);
+                player.intelligence += 1;
+                player.adjustMorality(5); // Virtuous choice
+                worldState.traveler_helped = true;
+            } else if (choice === 2) {
+                displayMessage('You question the traveler cautiously. They seem wary but explain they were attacked by a corrupted beast. They warn you of dangers ahead. (No immediate stat change, but useful info)');
+            } else if (choice === 3) {
+                displayMessage('You ignore the traveler and move on. Their pained groans fade behind you. You feel a slight pang of regret, but your focus remains on your own journey.');
+                player.adjustMorality(-5); // Corrupt choice
+            } else {
+                displayMessage('Invalid choice.');
+            }
+            questState.currentEncounter = null;
+            enterLocation(currentScene);
+        }
+
+        /**
+         * Handles the ancient rune encounter logic.
+         * @param {number} choice - The player's choice.
+         */
+        function handleAncientRuneEncounter(choice) {
+            if (choice === 1) {
+                const successChance = player.intelligence * 5;
+                if (Math.random() * 100 < successChance) {
+                    displayMessage('You focus your mind, carefully deciphering the ancient rune. The symbols shift and align, revealing a hidden message: "The true power lies within the heart of the artifact." You gain a deeper understanding of magic. (Intelligence +2)');
+                    player.intelligence += 2;
+                    player.learnSpell('mindecho');
+                    displayStats();
+                } else {
+                    displayMessage('You attempt to decipher the rune, but its meaning remains elusive. The symbols seem to mock your efforts.');
+                }
+            } else if (choice === 2) {
+                displayMessage('You decide not to meddle with ancient magic and leave the rune undisturbed.');
+            } else {
+                displayMessage('Invalid choice.');
+            }
+            questState.currentEncounter = null;
+            enterLocation(currentScene);
+        }
+
+        /**
+         * Handles the disarm trap encounter logic.
+         * @param {number} choice - The player's choice.
+         */
+        function handleDisarmTrapEncounter(choice) {
+            if (choice === 1) {
+                const successChance = player.dexterity * 5;
+                if (Math.random() * 100 < successChance) {
+                    displayMessage('You deftly disarm the trap, a series of hidden wires snapping harmlessly. You feel more agile. (Dexterity +1, Gain 10 Gold)');
+                    player.dexterity += 1;
+                    player.gainGold(10);
+                    worldState.trap_disarmed = true;
+                    displayStats();
+                } else {
+                    displayMessage('You fumble with the trap, and a small dart shoots out, grazing your arm. (Lose 5 HP)');
+                    player.takeDamage(5);
+                }
+            } else if (choice === 2) {
+                displayMessage('You carefully step around the trap, avoiding its mechanism.');
+            } else {
+                displayMessage('Invalid choice.');
+            }
+            questState.currentEncounter = null;
+            enterLocation(currentScene);
+        }
+
+        /**
+         * Handles the bandit encounter logic.
+         * @param {number} choice - The player's choice.
+         */
+        function handleBanditEncounter(choice) {
+            if (choice === 1) {
+                currentEnemy = { ...enemies['banditThug'] };
+                displayMessage(`You draw your weapon and prepare to fight the bandit!`);
+                startCombat();
+            } else if (choice === 2) {
+                const successChance = player.strength * 4;
+                if (Math.random() * 100 < successChance) {
+                    displayMessage('You glare at the bandit, your stance radiating power. The bandit hesitates, then backs away. "Alright, alright! Not worth the trouble!" they mutter, and disappear into the ruins. (Gain 5 XP)');
+                    player.gainXP(5);
+                    player.adjustMorality(3); // Virtuous choice
+                    worldState.bandit_spared = true;
+                    enterLocation(currentScene);
+                } else {
+                    displayMessage('You try to intimidate the bandit, but they just laugh. "Think you can scare me, eh? Let\'s see what you got!"');
+                    currentEnemy = { ...enemies['banditThug'] };
+                    startCombat();
+                }
+            } else if (choice === 3) {
+                if (player.gold >= 15) {
+                    player.loseGold(15);
+                    displayMessage('You offer the bandit 15 gold. Their eyes widen, and they snatch the coins. "Pleasure doing business," they grin, and quickly leave. (Lose 15 Gold)');
+                    player.adjustMorality(-3); // Corrupt choice
+                    worldState.bandit_spared = true;
+                    enterLocation(currentScene);
+                } else {
+                    displayMessage('You don\'t have enough gold to bribe the bandit. They scoff. "Don\'t waste my time!"');
+                    currentEnemy = { ...enemies['banditThug'] };
+                    startCombat();
+                }
+            } else {
+                displayMessage('Invalid choice.');
+                presentChoices([
+                    { text: 'Fight the bandit.', value: 1 },
+                    { text: 'Try to intimidate them (Strength check).', value: 2 },
+                    { text: 'Offer them 15 gold to leave.', value: 3 }
+                ], 'Type choice number...', 'Choose Action');
+            }
+        }
+
+        /**
+         * Triggers a random encounter if conditions are met.
+         */
+        function triggerRandomEncounter() {
+            if (questState.currentEncounter) return;
+
+            if (Math.random() < 0.4) {
+                const encounterType = Math.floor(Math.random() * 3);
+
+                switch (encounterType) {
+                    case 0:
+                        const combatEnemies = ['corruptedBeast', 'rogueElemental', 'goblinScout', 'banditThug'];
+                        const randomEnemyId = combatEnemies[Math.floor(Math.random() * combatEnemies.length)];
+                        initiateCombat(randomEnemyId);
+                        break;
+                    case 1:
+                        const skillChallengeType = Math.random() < 0.5 ? 'ancientRune' : 'disarmTrap';
+                        displayMessage(`\n${skillChallengeType === 'ancientRune' ? 'You stumble upon an ancient, glowing rune embedded in a crumbling wall. It seems to pulse with arcane energy.' : 'As you navigate the debris, you spot a cleverly hidden pressure plate. It looks like a trap!'}`);
+                        presentChoices([
+                            { text: skillChallengeType === 'ancientRune' ? 'Attempt to decipher the rune (Intelligence check).' : 'Attempt to disarm the trap (Dexterity check).', value: 1 },
+                            { text: skillChallengeType === 'ancientRune' ? 'Leave the rune alone.' : 'Try to carefully step around it.', value: 2 }
+                        ], 'Type choice number...', 'Choose Action');
+                        gameState = 'quest1';
+                        questState.currentEncounter = skillChallengeType;
+                        break;
+                    case 2:
+                        if (Math.random() < 0.5 && !worldState.bandit_spared) {
+                            displayMessage('\nAs you pick through the rubble, a gruff voice calls out, "Well, well, what do we have here? Looks like you\'ve got something shiny, eh?" A burly bandit steps out from behind a collapsed wall, a crude club in hand.');
+                            presentChoices([
+                                { text: 'Fight the bandit.', value: 1 },
+                                { text: 'Try to intimidate them (Strength check).', value: 2 },
+                                { text: 'Offer them 15 gold to leave.', value: 3 }
+                            ], 'Type choice number...', 'Choose Action');
+                            gameState = 'quest1';
+                            questState.currentEncounter = 'banditEncounter';
+                        } else {
+                            displayMessage('\nYou hear a faint groan from behind a pile of rubble. A wounded traveler, clutching their arm, is slumped against a broken wall.');
+                            presentChoices([
+                                { text: 'Offer to help them.', value: 1 },
+                                { text: 'Ask them what happened.', value: 2 },
+                                { text: 'Ignore them and move on.', value: 3 }
+                            ], 'Type choice number...', 'Choose Action');
+                            gameState = 'quest1';
+                            questState.currentEncounter = 'woundedTraveler';
+                        }
+                        break;
+                }
+            }
+        }
+
+        // --- Travel System Module ---
+        /**
+         * Handles the 'travel to [region]' command.
+         * @param {string} targetRegion - The region to travel to.
+         */
+        function handleTravelCommand(targetRegion) {
+            const normalizedTarget = targetRegion.toLowerCase().replace(/\s/g, '');
+            const validTargets = {
+                'ashvaleruins': 'ashvaleRuins', 'newashvale': 'newAshvale', 'whisperingforest': 'whisperingForest',
+                'ruinsofeldermoor': 'ruinsOfEldermoor', 'blisterforgecaverns': 'blisterforgeCaverns',
+                'mountainpath': 'mountainPath', 'denseforest': 'denseForest'
+            };
+
+            // Add new Act II regions to valid targets if Act II is triggered
+            if (worldState.actII_triggered) {
+                validTargets['veilscarcrater'] = 'veilscarCrater';
+                validTargets['templeofshatteredoath'] = 'templeOfShatteredOath';
+            }
+
+            if (validTargets[normalizedTarget]) {
+                const actualTargetId = validTargets[normalizedTarget];
+                if (actualTargetId === currentScene) {
+                    displayMessage(`You are already in ${locations[currentScene].name}.`);
+                    enterLocation(currentScene);
+                    return;
+                }
+                displayMessage(`You prepare to travel to ${locations[actualTargetId].name}...`);
+                triggerTravelEvent(actualTargetId);
+            } else {
+                displayMessage(`You don't know how to travel to "${targetRegion}". Try "travel to New Ashvale", "travel to Whispering Forest", etc.`);
+                // If Act II is triggered, suggest new regions
+                if (worldState.actII_triggered) {
+                    displayMessage('Perhaps try "travel to Veilscar Crater" or "travel to Temple of Shattered Oath".');
+                }
+                enterLocation(currentScene);
+            }
+        }
+
+        /**
+         * Triggers a random event during travel.
+         * @param {string} destinationId - The ID of the destination location.
+         */
+        function triggerTravelEvent(destinationId) {
+            gameState = 'travelEvent';
+            clearChoiceButtons();
+            gameInput.placeholder = 'Press Enter to continue...';
+            submitButton.textContent = 'Continue';
+
+            const eventChance = Math.random();
+            let travelEnemies = ['goblinScout', 'direWolf', 'banditThug', 'corruptedBeast'];
+
+            // Increase difficulty of travel encounters after Act II
+            if (worldState.actII_triggered) {
+                travelEnemies = ['corruptedBeast', 'rogueElemental', 'riftSpawn', 'ancientGuardianRemnant'];
+            }
+
+            if (eventChance < 0.3) {
+                const randomEnemyId = travelEnemies[Math.floor(Math.random() * travelEnemies.length)];
+                displayMessage(`\nAs you travel, you are ambushed by a ${enemies[randomEnemyId].name}!`);
+                questState.returnToDestination = destinationId;
+                initiateCombat(randomEnemyId);
+            } else if (eventChance < 0.5) {
+                displayMessage('\nDuring your journey, you encounter a swift river blocking your path.');
+                presentChoices([
+                    { text: 'Attempt to cross the river (Dexterity check).', value: 1 },
+                    { text: 'Search for a safer crossing (Intelligence check).', value: 2 },
+                    { text: 'Turn back.', value: 3 }
+                ], 'Type choice number...', 'Choose Action');
+                questState.currentEncounter = 'riverCrossing';
+                questState.returnToDestination = destinationId;
+            } else {
+                displayMessage('\nYour journey is uneventful. You arrive safely at your destination.');
+                enterLocation(destinationId);
+            }
+        }
+
+        /**
+         * Handles input during travel events.
+         * @param {string} input - The player's input.
+         */
+        function handleTravelEventInput(input) {
+            const choice = parseInt(input);
+            if (questState.currentEncounter === 'riverCrossing') {
+                if (choice === 1) {
+                    const successChance = player.dexterity * 4;
+                    if (Math.random() * 100 < successChance) {
+                        displayMessage('You skillfully navigate the treacherous currents and reach the other side safely. (Dexterity +1)');
+                        player.dexterity += 1;
+                        displayStats();
+                        displayMessage('You continue your journey.');
+                        enterLocation(questState.returnToDestination);
+                    } else {
+                        displayMessage('You slip on a wet rock and are swept downstream a short distance, taking some damage. (Lose 10 HP)');
+                        player.takeDamage(10);
+                        displayMessage('You eventually make it across, but shaken.');
+                        enterLocation(questState.returnToDestination);
+                    }
+                } else if (choice === 2) {
+                    const successChance = player.intelligence * 4;
+                    if (Math.random() * 100 < successChance) {
+                        displayMessage('You carefully scan the riverbanks and spot a narrow, shallow point upstream. You cross safely. (Intelligence +1)');
+                        player.intelligence += 1;
+                        displayStats();
+                        displayMessage('You continue your journey.');
+                        enterLocation(questState.returnToDestination);
+                    } else {
+                        displayMessage('You search for a safer crossing, but can\'t find one. You waste valuable time and must brave the main current, taking some damage. (Lose 5 HP)');
+                        player.takeDamage(5);
+                        displayMessage('You eventually make it across, frustrated.');
+                        enterLocation(questState.returnToDestination);
+                    }
+                } else if (choice === 3) {
+                    displayMessage('You decide the river is too dangerous and turn back to your previous location.');
+                    enterLocation(currentScene);
+                } else {
+                    displayMessage('Invalid choice. Please choose 1, 2, or 3.');
+                    return;
+                }
+                questState.currentEncounter = null;
+                questState.returnToDestination = null;
+            } else {
+                enterLocation(questState.returnToDestination);
+                questState.returnToDestination = null;
+            }
+        }
+
+        // --- Town and NPC Interaction Module ---
+        /**
+         * Handles actions within New Ashvale (town hub).
+         * @param {string} input - The player's input.
+         */
+        function handleTownInput(input) {
+            if (handleCommonCommands(input)) return;
+
+            const location = locations[currentScene];
+            const choiceIndex = parseInt(input) - 1;
+
+            if (choiceIndex >= 0 && choiceIndex < location.choices.length) {
+                const selectedChoice = location.choices[choiceIndex];
+                switch (selectedChoice.action) {
+                    case 'visitHealer':
+                        displayMessage('\nYou enter the Healer\'s Tent. A kind-faced woman smiles. "Welcome, weary traveler. For a small fee, I can mend your wounds and restore your spirit."');
+                        presentChoices([
+                            { text: 'Heal HP (10 Gold)', value: 1 },
+                            { text: 'Restore Mana (10 Gold)', value: 2 },
+                            { text: 'Full Restore (20 Gold)', value: 3 },
+                            { text: 'Leave', value: 4 }
+                        ], 'Type choice number...', 'Choose Action');
+                        gameState = 'healerInteraction';
+                        break;
+                    case 'browseMarket':
+                        displayMessage('\nYou browse the makeshift market. Various goods are laid out on tarps. You can buy or sell items here.');
+                        presentChoices([
+                            { text: 'Buy items', value: 1 },
+                            { text: 'Sell items', value: 2 },
+                            { text: 'Leave market', value: 3 }
+                        ], 'Type choice number...', 'Choose Action');
+                        gameState = 'marketInteraction';
+                        break;
+                    case 'speakNPC':
+                        currentNPC = selectedChoice.target;
+                        startNPCDialogue(currentNPC);
+                        break;
+                    case 'saveGame':
+                        saveGame();
+                        enterLocation(currentScene);
+                        break;
+                    case 'loadGame':
+                        loadGame();
+                        break;
+                    case 'explore':
+                        enterLocation(selectedChoice.target);
+                        break;
+                    default:
+                        displayMessage('You attempt an action, but nothing happens.');
+                        enterLocation(currentScene);
+                        break;
+                }
+            } else {
+                displayMessage('Invalid choice. Please type the number corresponding to your desired action, or "inventory", "use [item]", "look", "travel to [region]".');
+            }
+        }
+
+        /**
+         * Handles interactions within the Healer's Tent.
+         * @param {string} input - The player's input.
+         */
+        function handleHealerInteraction(input) {
+            const choice = parseInt(input);
+            switch (choice) {
+                case 1:
+                    if (player.loseGold(10)) { player.heal(player.maxHp * 0.5); displayMessage('Your wounds feel less severe.'); } break;
+                case 2:
+                    if (player.loseGold(10)) { player.restoreMana(player.maxMana * 0.5); displayMessage('Your mind feels clearer.'); } break;
+                case 3:
+                    if (player.loseGold(20)) { player.heal(player.maxHp); player.restoreMana(player.maxMana); displayMessage('You feel completely refreshed!'); } break;
+                case 4:
+                    displayMessage('You leave the Healer\'s Tent.'); gameState = 'town'; enterLocation('newAshvale'); return;
+                default:
+                    displayMessage('Invalid choice. Please choose 1, 2, 3, or 4.'); break;
+            }
+            displayStats();
+            displayMessage('\nWhat else would you like to do at the Healer\'s Tent?');
+            presentChoices([
+                { text: 'Heal HP (10 Gold)', value: 1 },
+                { text: 'Restore Mana (10 Gold)', value: 2 },
+                { text: 'Full Restore (20 Gold)', value: 3 },
+                { text: 'Leave', value: 4 }
+            ], 'Type choice number...', 'Choose Action');
+        }
+
+        /**
+         * Handles interactions within the Market.
+         * @param {string} input - The player's input.
+         */
+        function handleMarketInteraction(input) {
+            const choice = parseInt(input);
+            switch (choice) {
+                case 1:
+                    displayMessage('\n--- Buy Items ---');
+                    displayMessage('Available for purchase:');
+                    presentChoices([
+                        { text: 'Healing Potion (20 Gold)', value: 1 },
+                        { text: 'Mana Elixir (25 Gold)', value: 2 },
+                        { text: 'Iron Sword (50 Gold)', value: 3 },
+                        { text: 'Leather Vest (15 Gold)', value: 4 },
+                        { text: 'Back to Market Menu', value: 5 }
+                    ], 'Type choice number...', 'Choose Item to Buy');
+                    gameState = 'marketBuy';
+                    break;
+                case 2:
+                    displayMessage('\n--- Sell Items ---');
+                    if (player.inventory.length === 0) {
+                        displayMessage('Your inventory is empty. Nothing to sell.');
+                        handleMarketInteraction('3'); // Go back to market menu
+                        return;
+                    }
+                    displayMessage('Select an item to sell:');
+                    const sellableItems = player.inventory.filter(item => !items[item.id].questItem).map((item, index) => ({
+                        text: `${items[item.id].name} (x${item.count}) - Value: ${items[item.id].value} Gold each`,
+                        value: index + 1,
+                        itemId: item.id
+                    }));
+                    presentChoices(sellableItems.concat([{ text: 'Back to Market Menu', value: sellableItems.length + 1 }]), 'Type choice number...', 'Choose Item to Sell');
+                    gameState = 'marketSell';
+                    break;
+                case 3:
+                    displayMessage('You leave the market.');
+                    gameState = 'town';
+                    enterLocation('newAshvale');
+                    return;
+                default:
+                    displayMessage('Invalid choice. Please choose 1, 2, or 3.');
+                    break;
+            }
+            displayStats();
+        }
+
+        /**
+         * Handles buying items in the market.
+         * @param {string} input - The player's input.
+         */
+        function handleMarketBuy(input) {
+            const choice = parseInt(input);
+            let itemToBuy = null;
+            let cost = 0;
+
+            switch (choice) {
+                case 1: itemToBuy = 'healingPotion'; cost = 20; break;
+                case 2: itemToBuy = 'manaElixir'; cost = 25; break;
+                case 3: itemToBuy = 'ironSword'; cost = 50; break;
+                case 4: itemToBuy = 'leatherVest'; cost = 15; break;
+                case 5: handleMarketInteraction('3'); return; // Back
+                default: displayMessage('Invalid choice.'); handleMarketInteraction('1'); return;
+            }
+
+            if (itemToBuy && player.gold >= cost) {
+                player.loseGold(cost);
+                player.addItem(itemToBuy);
+                displayMessage(`You bought ${items[itemToBuy].name}.`);
+            } else if (itemToBuy) {
+                displayMessage('You do not have enough gold.');
+            }
+            handleMarketInteraction('1');
+        }
+
+        /**
+         * Handles selling items in the market.
+         * @param {string} input - The player's input.
+         */
+        function handleMarketSell(input) {
+            const choice = parseInt(input);
+            const sellableItems = player.inventory.filter(item => !items[item.id].questItem);
+
+            if (choice === sellableItems.length + 1) {
+                handleMarketInteraction('3');
+                return;
+            }
+
+            const itemIndex = choice - 1;
+            if (itemIndex >= 0 && itemIndex < sellableItems.length) {
+                const itemEntry = sellableItems[itemIndex];
+                const itemId = itemEntry.id;
+                const item = items[itemId];
+
+                if (item.type === 'weapon' && player.equippedWeapon === itemId) {
+                    displayMessage('You cannot sell an equipped weapon. Unequip it first.');
+                } else if (item.type === 'armor' && player.equippedArmor === itemId) {
+                    displayMessage('You cannot sell equipped armor. Unequip it first.');
+                } else {
+                    player.removeItem(itemId);
+                    player.gainGold(Math.floor(item.value * 0.5));
+                    displayMessage(`You sold ${item.name} for ${Math.floor(item.value * 0.5)} gold.`);
+                }
+            } else {
+                displayMessage('Invalid choice.');
+            }
+            handleMarketInteraction('2');
+        }
+
+        /**
+         * Starts dialogue with an NPC.
+         * @param {string} npcId - The ID of the NPC.
+         */
+        function startNPCDialogue(npcId) {
+            gameState = 'npcDialogue';
+            currentNPC = npcId;
+            const npc = npcs[npcId];
+            displayMessage(`\n--- Speaking with ${npc.name} ---`);
+
+            let dialogueKey = 'initial';
+            // Determine dialogue key based on quest status and inventory
+            if (npcId === 'seren') {
+                if (quests.ashAndDagger.status === 'inProgress' && quests.ashAndDagger.giver === 'seren') dialogueKey = 'questInProgress';
+                else if (quests.ashAndDagger.status === 'inProgress' && quests.ashAndDagger.giver === 'varric' && player.inventory.some(i => i.id === 'enchantedDaggers')) dialogueKey = 'questAvailable';
+                else if (quests.ashAndDagger.status === 'notStarted' && !player.inventory.some(i => i.id === 'enchantedDaggers')) dialogueKey = 'questAvailable';
+                else if (quests.ashAndDagger.status === 'completed' && quests.ashAndDagger.giver === 'seren') dialogueKey = 'afterQuest';
+
+                if (quests.forestWhispers.status === 'inProgress' && quests.forestWhispers.giver === 'seren') dialogueKey = 'forestQuestInProgress';
+                else if (quests.forestWhispers.status === 'notStarted' && questState.embersOfMemory.completed) dialogueKey = 'forestQuestAvailable';
+                else if (quests.forestWhispers.status === 'completed' && quests.forestWhispers.giver === 'seren') dialogueKey = 'forestQuestComplete';
+
+                // Act II dialogue
+                if (worldState.actII_triggered) {
+                    if (player.morality > 20) dialogueKey = 'actII_virtuous';
+                    else if (player.morality < -20) dialogueKey = 'actII_corrupt';
+                    else dialogueKey = 'actII_neutral';
+                }
+
+            } else if (npcId === 'varric') {
+                if (quests.ashAndDagger.status === 'inProgress' && quests.ashAndDagger.giver === 'varric') dialogueKey = 'questInProgress';
+                else if (quests.ashAndDagger.status === 'inProgress' && quests.ashAndDagger.giver === 'seren' && player.inventory.some(i => i.id === 'enchantedDaggers')) dialogueKey = 'questAvailable';
+                else if (quests.ashAndDagger.status === 'notStarted' && !player.inventory.some(i => i.id === 'enchantedDaggers')) dialogueKey = 'questAvailable';
+                else if (quests.ashAndDagger.status === 'completed' && quests.ashAndDagger.giver === 'varric') dialogueKey = 'afterQuest';
+
+                if (quests.eldermoorSecrets.status === 'inProgress' && quests.eldermoorSecrets.giver === 'varric') dialogueKey = 'eldermoorQuestInProgress';
+                else if (quests.eldermoorSecrets.status === 'notStarted' && questState.embersOfMemory.completed) dialogueKey = 'eldermoorQuestAvailable';
+                else if (quests.eldermoorSecrets.status === 'completed' && quests.eldermoorSecrets.giver === 'varric') dialogueKey = 'eldermoorQuestComplete';
+
+                // Act II dialogue
+                if (worldState.actII_triggered) {
+                    if (player.morality > 20) dialogueKey = 'actII_virtuous';
+                    else if (player.morality < -20) dialogueKey = 'actII_corrupt';
+                    else dialogueKey = 'actII_neutral';
+                }
+            } else if (npcId === 'maelin') {
+                if (questState.embersOfMemory.completed) dialogueKey = 'afterQuest';
+                // Act II dialogue for Maelin
+                if (worldState.actII_triggered) {
+                    dialogueKey = 'actII_initial';
+                }
+            }
+
+            displayMessage(`${npc.name}: ${npc.dialogue[dialogueKey]}`);
+            displayNPCDialogueChoices(npc, dialogueKey);
+        }
+
+        /**
+         * Displays dialogue choices for the current NPC.
+         * @param {object} npc - The NPC object.
+         * @param {string} dialogueKey - The current dialogue key.
+         */
+        function displayNPCDialogueChoices(npc, dialogueKey) {
+            clearChoiceButtons();
+            let currentChoices = npc.choices[dialogueKey] || npc.choices.initial;
+
+            // Dynamically adjust quest choices for Seren
+            if (npc.id === 'seren') {
+                if (dialogueKey === 'seren_quest') {
+                    currentChoices = [];
+                    if (quests.ashAndDagger.status === 'notStarted' || (quests.ashAndDagger.status === 'inProgress' && quests.ashAndDagger.giver === 'varric')) {
+                         currentChoices.push({ text: npcs.seren.dialogue.questAvailable, action: "acceptQuest", questId: "ashAndDagger", faction: "orderOfFlame", morality: 5 });
+                    }
+                    if (quests.forestWhispers.status === 'notStarted' && questState.embersOfMemory.completed) {
+                        currentChoices.push({ text: npcs.seren.dialogue.forestQuestAvailable, action: "acceptQuest", questId: "forestWhispers", faction: "orderOfFlame", morality: 5 });
+                    }
+                    currentChoices.push({ text: "I cannot help you right now.", action: "dialogue", target: "seren_initial", morality: 0 });
+                } else if (dialogueKey === 'questAvailable' && player.inventory.some(item => item.id === quests.ashAndDagger.targetItem)) {
+                    currentChoices = npcs.seren.choices.ashAndDagger_complete;
+                } else if (dialogueKey === 'forestQuestAvailable' && quests.forestWhispers.status === 'inProgress' && quests.forestWhispers.giver === 'seren' && worldState.shrine_found) {
+                    currentChoices = npcs.seren.choices.forestWhispers_complete;
+                }
+            }
+            // Dynamically adjust quest choices for Varric
+            else if (npc.id === 'varric') {
+                if (dialogueKey === 'varric_quest') {
+                    currentChoices = [];
+                    if (quests.ashAndDagger.status === 'notStarted' || (quests.ashAndDagger.status === 'inProgress' && quests.ashAndDagger.giver === 'seren')) {
+                        currentChoices.push({ text: npcs.varric.dialogue.questAvailable, action: "acceptQuest", questId: "ashAndDagger", faction: "shadowSyndicate", morality: -5 });
+                    }
+                    if (quests.eldermoorSecrets.status === 'notStarted' && questState.embersOfMemory.completed) {
+                        currentChoices.push({ text: npcs.varric.dialogue.eldermoorQuestAvailable, action: "acceptQuest", questId: "eldermoorSecrets", faction: "shadowSyndicate", morality: -5 });
+                    }
+                    currentChoices.push({ text: "Nothing for you then.", action: "dialogue", target: "varric_initial", morality: 0 });
+                } else if (dialogueKey === 'questAvailable' && player.inventory.some(item => item.id === quests.ashAndDagger.targetItem)) {
+                    currentChoices = npcs.varric.choices.ashAndDagger_complete;
+                } else if (dialogueKey === 'eldermoorQuestAvailable' && quests.eldermoorSecrets.status === 'inProgress' && quests.eldermoorSecrets.giver === 'varric' && player.inventory.some(i => i.id === quests.eldermoorSecrets.targetItem)) {
+                    currentChoices = npcs.varric.choices.eldermoorSecrets_complete;
+                }
+            } else if (npc.id === 'maelin' && worldState.actII_triggered && dialogueKey === 'actII_initial') {
+                currentChoices = npcs.maelin.choices.actII_path_choice;
+            }
+
+
+            currentChoices.forEach((choice, index) => {
+                const choiceText = choice.text.split(':')[0] === npc.name ? choice.text.split(':')[1].trim() : choice.text;
+                createChoiceButton(index + 1, choiceText, choice.action, choice.target, choice.questId, choice.faction, choice.morality, choice.path, choice.vision);
+            });
+            gameInput.placeholder = 'Type choice number...';
+            submitButton.textContent = 'Respond';
+        }
+
+        /**
+         * Handles input during NPC dialogue.
+         * @param {string} input - The player's input.
+         */
+        function handleNPCDialogueInput(input) {
+            const choiceIndex = parseInt(input) - 1;
+            const npc = npcs[currentNPC];
+            const selectedButton = choiceButtonsContainer.children[choiceIndex];
+
+            if (!selectedButton) {
+                displayMessage('Invalid choice. Please type the number corresponding to your desired response.');
+                return;
+            }
+
+            const choiceAction = selectedButton.dataset.action;
+            const choiceTarget = selectedButton.dataset.target;
+            const choiceQuestId = selectedButton.dataset.questId;
+            const choiceFaction = selectedButton.dataset.faction;
+            const choiceMorality = parseInt(selectedButton.dataset.morality);
+            const choicePath = selectedButton.dataset.path;
+            const choiceVision = selectedButton.dataset.vision;
+
+            if (choiceMorality !== undefined && !isNaN(choiceMorality)) {
+                player.adjustMorality(choiceMorality);
+            }
+
+            switch (choiceAction) {
+                case "endDialogue":
+                    displayMessage(`You end your conversation with ${npc.name}.`);
+                    gameState = 'town';
+                    enterLocation('newAshvale');
+                    break;
+                case "dialogue":
+                    displayMessage(`${npc.name}: ${npc.dialogue[choiceTarget]}`);
+                    displayNPCDialogueChoices(npc, choiceTarget);
+                    break;
+                case "acceptQuest":
+                    if (quests[choiceQuestId].status === 'notStarted') {
+                        quests[choiceQuestId].status = 'inProgress';
+                        quests[choiceQuestId].giver = npc.id;
+                        displayMessage(`You accepted the quest: "${quests[choiceQuestId].name}" from ${npc.name}.`);
+                        displayMessage(`Your task: ${quests[choiceQuestId].description}`);
+                        player.adjustReputation(choiceFaction, 2);
+                    } else {
+                        displayMessage(`You already have an active quest related to this.`);
+                    }
+                    startNPCDialogue(currentNPC);
+                    break;
+                case "completeQuest":
+                    const quest = quests[choiceQuestId];
+                    let hasRequiredItem = true;
+                    if (quest.targetItem) {
+                        hasRequiredItem = player.inventory.some(item => item.id === quest.targetItem);
+                    } else if (choiceQuestId === 'forestWhispers') {
+                        hasRequiredItem = worldState.shrine_found;
+                    }
+
+                    if (quest.status === 'inProgress' && hasRequiredItem) {
+                        if (quest.targetItem) {
+                            player.removeItem(quest.targetItem);
+                        }
+                        const rewards = quest.rewards[choiceFaction];
+                        player.gainGold(rewards.gold);
+                        if (rewards.reputation.orderOfFlame) player.adjustReputation('orderOfFlame', rewards.reputation.orderOfFlame);
+                        if (rewards.reputation.shadowSyndicate) player.adjustReputation('shadowSyndicate', rewards.reputation.shadowSyndicate);
+                        rewards.items.forEach(item => player.addItem(item.id, item.count));
+                        quest.status = 'completed';
+                        displayMessage(`You completed the quest: "${quest.name}"!`);
+                        displayMessage(`${npc.name}: ${npc.dialogue.questComplete}`);
+                        startNPCDialogue(currentNPC);
+                    } else {
+                        displayMessage(`You don't have the required item/condition to complete this quest, or it's not the right time.`);
+                        startNPCDialogue(currentNPC);
+                    }
+                    break;
+                case "chooseNarrativePath":
+                    handleChooseNarrativePath(choicePath, choiceVision);
+                    break;
+                default:
+                    displayMessage('Invalid choice. Please type the number corresponding to your desired response.');
+                    break;
+            }
+        }
+
+        // --- Combat Module ---
+        /**
+         * Initiates combat with a specified enemy.
+         * @param {string} enemyId - The ID of the enemy to fight.
+         */
+        function initiateCombat(enemyId) {
+            currentEnemy = { ...enemies[enemyId] };
+            // Scale enemy HP and damage based on player level and Act II status
+            let levelMultiplier = 1 + (player.level - 1) * 0.1;
+            if (worldState.actII_triggered) {
+                levelMultiplier *= 1.2; // Enemies are tougher in Act II
+            }
+
+            currentEnemy.hp = Math.floor(currentEnemy.hp * levelMultiplier);
+            currentEnemy.maxHp = currentEnemy.hp;
+            currentEnemy.strength = Math.floor(currentEnemy.strength * (1 + (player.level - 1) * 0.05));
+            currentEnemy.intelligence = Math.floor(currentEnemy.intelligence * (1 + (player.level - 1) * 0.05));
+            currentEnemy.dexterity = Math.floor(currentEnemy.dexterity * (1 + (player.level - 1) * 0.05));
+
+            startCombat();
+        }
+
+        /**
+         * Starts combat with the current enemy.
+         */
+        function startCombat() {
+            gameState = 'combat';
+            combatLog = [];
+            displayMessage(`\n--- Combat against ${currentEnemy.name} ---`);
+            displayMessage(`${currentEnemy.description}`);
+            displayMessage(`${currentEnemy.name} HP: ${currentEnemy.currentHp}/${currentEnemy.maxHp}`);
+            player.dodgeAvailable = true;
+            player.defenseBuff = 0;
+            bossFightState = {
+                currentBoss: currentEnemy.name,
+                currentPhase: currentEnemy.currentPhase || 0,
+                fadewalkActive: false
+            };
+            playerTurn();
+        }
+
+        /**
+         * Handles the player's turn in combat.
+         */
+        function playerTurn() {
+            if (player.currentHp <= 0) {
+                gameOver();
+                return;
+            }
+
+            displayMessage('\nIt\'s your turn!');
+            displayMessage('Choose your action:');
+            const combatChoices = [
+                { text: `Attack (${classes[player.pClass].abilities.basicAttack.name})`, action: 'basicAttack' },
+                { text: `Use Power (${classes[player.pClass].abilities.power.name} - Mana Cost: ${classes[player.pClass].abilities.power.cost})`, action: 'usePower' }
+            ];
+
+            player.learnedSpells.forEach((spellId) => {
+                combatChoices.push({ text: `Cast Spell: ${spells[spellId].name} (Mana Cost: ${spells[spellId].cost})`, action: 'castSpell', spellId: spellId });
+            });
+
+            if (player.evolvedPower === 'fadewalk' && !bossFightState.fadewalkActive) {
+                combatChoices.push({ text: `Activate Fadewalk (Evade next turn)`, action: 'activateFadewalk' });
+            }
+
+            combatChoices.push({ text: 'Inventory', action: 'viewInventory' });
+            combatChoices.push({ text: 'Flee', action: 'flee' });
+
+
+            presentChoices(combatChoices.map((c, i) => ({ text: c.text, value: i + 1, action: c.action, spellId: c.spellId })), 'Type choice number, or "use [item]"...', 'Perform Action');
+        }
+
+        /**
+         * Handles input during combat.
+         * @param {string} input - The player's input.
+         */
+        function handleCombatInput(input) {
+            const choice = parseInt(input);
+            const combatOptions = [
+                { action: 'basicAttack' },
+                { action: 'usePower' }
+            ];
+            player.learnedSpells.forEach((spellId) => {
+                combatOptions.push({ action: 'castSpell', spellId: spellId });
+            });
+            if (player.evolvedPower === 'fadewalk' && !bossFightState.fadewalkActive) {
+                combatOptions.push({ action: 'activateFadewalk' });
+            }
+            combatOptions.push({ action: 'viewInventory' });
+            combatOptions.push({ action: 'flee' });
+
+
+            if (input.startsWith('use ')) {
+                const itemToUse = input.substring(4).trim();
+                const itemFound = player.inventory.find(item => items[item.id].name.toLowerCase() === itemToUse.toLowerCase());
+                if (itemFound && items[itemFound.id].type === 'potion') {
+                    useItem(itemToUse);
+                    checkCombatEnd();
+                } else {
+                    displayMessage('You can only use potions in combat. Try "inventory" to see what you have.');
+                    playerTurn();
+                }
+                return;
+            }
+
+            if (choice >= 1 && choice <= combatOptions.length) {
+                const selectedAction = combatOptions[choice - 1];
+                switch (selectedAction.action) {
+                    case 'basicAttack':
+                        let damage = classes[player.pClass].abilities.basicAttack.damage();
+                        if (player.equippedWeapon) damage += weapons[player.equippedWeapon].attackBonus;
+                        displayMessage(`You use ${classes[player.pClass].abilities.basicAttack.name}!`);
+
+                        // Soulfire power effect
+                        if (player.awakenedPower === 'soulfire' && Math.random() < (player.perks.includes('upgradeSoulfire') ? 0.4 : 0.25)) {
+                            const burnDamage = Math.floor(player.intelligence * (player.perks.includes('upgradeSoulfire') ? 0.7 : 0.5));
+                            displayMessage(`Your attack ignites ${currentEnemy.name} with Soulfire, dealing ${burnDamage} extra burn damage!`);
+                            damage += burnDamage;
+                        }
+                        currentEnemy.hp -= damage;
+                        displayMessage(`${currentEnemy.name} took ${Math.floor(damage)} damage.`);
+                        break;
+                    case 'usePower':
+                        const power = classes[player.pClass].abilities.power;
+                        if (player.currentMana >= power.cost) {
+                            player.useMana(power.cost);
+                            const powerDamage = power.damage();
+                            displayMessage(`You unleash ${power.name}!`);
+                            currentEnemy.hp -= powerDamage;
+                            displayMessage(`${currentEnemy.name} took ${Math.floor(powerDamage)} damage.`);
+                        } else {
+                            displayMessage('Not enough mana!');
+                            playerTurn(); return;
+                        }
+                        break;
+                    case 'castSpell':
+                        const spell = spells[selectedAction.spellId];
+                        if (player.currentMana >= spell.cost) {
+                            player.useMana(spell.cost);
+                            displayMessage(`You cast ${spell.name}!`);
+                            if (spell.type === 'magical' || spell.type === 'magical_aoe') {
+                                let spellDamage = spell.damage(player.intelligence);
+                                // Infernal Halo (Evolved Soulfire) effect
+                                if (player.evolvedPower === 'infernalHalo' && Math.random() < 0.3) {
+                                    const igniteDamage = Math.floor(player.intelligence * 0.8);
+                                    displayMessage(`Your spell ignites ${currentEnemy.name} with Infernal Halo, dealing ${igniteDamage} extra burn damage!`);
+                                    spellDamage += igniteDamage;
+                                }
+                                currentEnemy.hp -= spellDamage;
+                                displayMessage(`${currentEnemy.name} took ${Math.floor(spellDamage)} magical damage.`);
+                            } else if (spell.type === 'buff' || spell.type === 'healing') {
+                                spell.effect();
+                            } else if (spell.type === 'utility') {
+                                displayMessage('Utility spells like Mind Echo are generally not effective in direct combat.');
+                                playerTurn(); return;
+                            }
+                        } else {
+                            displayMessage('Not enough mana to cast that spell!');
+                            playerTurn(); return;
+                        }
+                        break;
+                    case 'activateFadewalk':
+                        if (player.evolvedPower === 'fadewalk' && !bossFightState.fadewalkActive) {
+                            bossFightState.fadewalkActive = true;
+                            displayMessage('You activate Fadewalk, becoming momentarily intangible! You will evade the next attack.');
+                        } else {
+                            displayMessage('Fadewalk is not available or already active.');
+                            playerTurn(); return;
+                        }
+                        break;
+                    case 'viewInventory':
+                        viewInventory(true);
+                        playerTurn(); return;
+                    case 'flee':
+                        if (Math.random() < 0.5) {
+                            displayMessage('You successfully fled from combat!');
+                            currentEnemy = null; player.defenseBuff = 0;
+                            if (questState.returnToDestination) { enterLocation(questState.returnToDestination); questState.returnToDestination = null; }
+                            else { enterLocation(currentScene); }
+                        } else {
+                            displayMessage('You failed to flee!');
+                            enemyTurn();
+                        }
+                        return;
+                    default:
+                        displayMessage('Invalid combat choice. Please choose from the options.');
+                        playerTurn(); return;
+                }
+            } else {
+                displayMessage('Invalid combat choice. Please choose from the options.');
+                playerTurn(); return;
+            }
+            displayStats();
+            checkCombatEnd();
+        }
+
+        /**
+         * Checks if combat has ended (enemy defeated or player defeated).
+         */
+        function checkCombatEnd() {
+            if (currentEnemy.hp <= 0) {
+                displayMessage(`\nYou defeated the ${currentEnemy.name}!`);
+                player.gainXP(currentEnemy.xpReward);
+                if (currentEnemy.name === 'Corrupted Spirit') questState.embersOfMemory.defeatedSpirit = true;
+                if (currentEnemy.name === 'The Hollow Knight') worldState.hollowKnight_defeated = true;
+                if (currentEnemy.name === 'Ashwyrm, the Flame Warden') worldState.ashwyrm_defeated = true;
+
+                currentEnemy = null; player.defenseBuff = 0;
+                if (questState.returnToDestination) {
+                    displayMessage('You continue your journey after the fight.');
+                    enterLocation(questState.returnToDestination);
+                    questState.returnToDestination = null;
+                } else {
+                    enterLocation(currentScene);
+                }
+            } else if (player.currentHp <= 0) {
+                gameOver();
+            } else {
+                enemyTurn();
+            }
+        }
+
+        /**
+         * Handles the enemy's turn in combat.
+         */
+        function enemyTurn() {
+            if (!currentEnemy) return;
+
+            displayMessage(`\nIt's ${currentEnemy.name}'s turn!`);
+            const damageDealt = currentEnemy.attack();
+            player.takeDamage(damageDealt);
+            displayMessage(`${currentEnemy.name} attacks you for ${Math.floor(damageDealt)} damage.`);
+
+            if (player.currentHp <= 0) {
+                gameOver();
+            } else {
+                playerTurn();
+            }
+        }
+
+        // --- Boss Combat Module ---
+        /**
+         * Initiates a cinematic boss combat.
+         * @param {string} bossId - The ID of the boss to fight.
+         */
+        function startBossCombat(bossId) {
+            currentEnemy = { ...enemies[bossId] };
+            currentEnemy.currentPhase = 0; // Reset phase for new fight
+            bossFightState = {
+                currentBoss: bossId,
+                currentPhase: 0,
+                fadewalkActive: false,
+                narrativeChoiceMade: false // For mid-fight choices
+            };
+            gameState = 'bossCombat';
+            displayMessage(`\n--- BOSS BATTLE: ${currentEnemy.name} ---`);
+            displayMessage(`${currentEnemy.description}`);
+            displayMessage(`\nPhase 1: ${currentEnemy.phases[0].name}`);
+            playerTurnBoss();
+        }
+
+        /**
+         * Handles player's turn in boss combat.
+         */
+        function playerTurnBoss() {
+            if (player.currentHp <= 0) { gameOver(); return; }
+            if (currentEnemy.hp <= 0) { checkCombatEnd(); return; }
+
+            displayMessage('\nIt\'s your turn!');
+            displayMessage(`${currentEnemy.name} HP: ${currentEnemy.hp}/${currentEnemy.maxHp} (Phase ${bossFightState.currentPhase + 1})`);
+            displayMessage('Choose your action:');
+
+            const combatChoices = [
+                { text: `Attack (${classes[player.pClass].abilities.basicAttack.name})`, action: 'basicAttack' },
+                { text: `Use Power (${classes[player.pClass].abilities.power.name} - Mana Cost: ${classes[player.pClass].abilities.power.cost})`, action: 'usePower' }
+            ];
+
+            player.learnedSpells.forEach((spellId) => {
+                combatChoices.push({ text: `Cast Spell: ${spells[spellId].name} (Mana Cost: ${spells[spellId].cost})`, action: 'castSpell', spellId: spellId });
+            });
+
+            if (player.evolvedPower === 'fadewalk' && !bossFightState.fadewalkActive) {
+                combatChoices.push({ text: `Activate Fadewalk (Evade next turn)`, action: 'activateFadewalk' });
+            }
+
+            // Mid-fight narrative choices for Hollow Knight
+            if (bossFightState.currentBoss === 'hollowKnight' && currentEnemy.hp / currentEnemy.maxHp < 0.7 && !bossFightState.narrativeChoiceMade) {
+                displayMessage("\nThe Hollow Knight pauses, its spectral form flickering. A faint, mournful wail echoes through the keep.");
+                combatChoices.push({ text: "Try to reason with the spirit (Morality check)", action: "reasonWithKnight" });
+                combatChoices.push({ text: "Press the attack relentlessly", action: "pressAttack" });
+            }
+            // Mid-fight narrative choices for Ashwyrm
+            if (bossFightState.currentBoss === 'ashwyrm' && currentEnemy.hp / currentEnemy.maxHp < 0.6 && !bossFightState.narrativeChoiceMade) {
+                displayMessage("\nThe Ashwyrm roars, causing the lava to surge! It seems to be drawing power from the molten core.");
+                combatChoices.push({ text: "Look for a way to disrupt its connection to the lava (Intelligence check)", action: "disruptAshwyrm" });
+                combatChoices.push({ text: "Focus all attacks on the Ashwyrm", action: "focusAshwyrm" });
+            }
+
+
+            combatChoices.push({ text: 'Inventory', action: 'viewInventory' });
+            // Fleeing from boss might be harder or have consequences
+            combatChoices.push({ text: 'Attempt to Flee', action: 'flee' });
+
+            presentChoices(combatChoices.map((c, i) => ({ text: c.text, value: i + 1, action: c.action, spellId: c.spellId })), 'Type choice number, or "use [item]"...', 'Perform Action');
+        }
+
+        /**
+         * Handles input during boss combat.
+         * @param {string} input - The player's input.
+         */
+        function handleBossCombatInput(input) {
+            const choice = parseInt(input);
+            const combatOptions = [];
+            // Populate combatOptions based on available choices from playerTurnBoss
+            // This is crucial because selectedButton.dataset relies on this mapping
+            const displayedChoices = choiceButtonsContainer.children;
+            for (let i = 0; i < displayedChoices.length; i++) {
+                const btn = displayedChoices[i];
+                combatOptions.push({
+                    action: btn.dataset.action,
+                    spellId: btn.dataset.spellId,
+                    // Add any other relevant dataset properties here
+                });
+            }
+
+            if (input.startsWith('use ')) {
+                const itemToUse = input.substring(4).trim();
+                const itemFound = player.inventory.find(item => items[item.id].name.toLowerCase() === itemToUse.toLowerCase());
+                if (itemFound && items[itemFound.id].type === 'potion') {
+                    useItem(itemToUse);
+                    checkBossCombatEnd();
+                } else {
+                    displayMessage('You can only use potions in combat. Try "inventory" to see what you have.');
+                    playerTurnBoss();
+                }
+                return;
+            }
+
+            if (choice >= 1 && choice <= combatOptions.length) {
+                const selectedAction = combatOptions[choice - 1];
+                switch (selectedAction.action) {
+                    case 'basicAttack':
+                        let damage = classes[player.pClass].abilities.basicAttack.damage();
+                        if (player.equippedWeapon) damage += weapons[player.equippedWeapon].attackBonus;
+                        displayMessage(`You use ${classes[player.pClass].abilities.basicAttack.name}!`);
+                        if (player.awakenedPower === 'soulfire' && Math.random() < (player.perks.includes('upgradeSoulfire') ? 0.4 : 0.25)) {
+                            const burnDamage = Math.floor(player.intelligence * (player.perks.includes('upgradeSoulfire') ? 0.7 : 0.5));
+                            displayMessage(`Your attack ignites ${currentEnemy.name} with Soulfire, dealing ${burnDamage} extra burn damage!`);
+                            damage += burnDamage;
+                        }
+                        currentEnemy.hp -= damage;
+                        displayMessage(`${currentEnemy.name} took ${Math.floor(damage)} damage.`);
+                        break;
+                    case 'usePower':
+                        const power = classes[player.pClass].abilities.power;
+                        if (player.currentMana >= power.cost) {
+                            player.useMana(power.cost);
+                            const powerDamage = power.damage();
+                            displayMessage(`You unleash ${power.name}!`);
+                            currentEnemy.hp -= powerDamage;
+                            displayMessage(`${currentEnemy.name} took ${Math.floor(powerDamage)} damage.`);
+                        } else {
+                            displayMessage('Not enough mana!');
+                            playerTurnBoss(); return;
+                        }
+                        break;
+                    case 'castSpell':
+                        const spell = spells[selectedAction.spellId];
+                        if (player.currentMana >= spell.cost) {
+                            player.useMana(spell.cost);
+                            displayMessage(`You cast ${spell.name}!`);
+                            if (spell.type === 'magical' || spell.type === 'magical_aoe') {
+                                let spellDamage = spell.damage(player.intelligence);
+                                if (player.evolvedPower === 'infernalHalo' && Math.random() < 0.3) {
+                                    const igniteDamage = Math.floor(player.intelligence * 0.8);
+                                    displayMessage(`Your spell ignites ${currentEnemy.name} with Infernal Halo, dealing ${igniteDamage} extra burn damage!`);
+                                    spellDamage += igniteDamage;
+                                }
+                                currentEnemy.hp -= spellDamage;
+                                displayMessage(`${currentEnemy.name} took ${Math.floor(spellDamage)} magical damage.`);
+                            } else if (spell.type === 'buff' || spell.type === 'healing') {
+                                spell.effect();
+                            } else if (spell.type === 'utility') {
+                                displayMessage('Utility spells like Mind Echo are generally not effective in direct combat.');
+                                playerTurnBoss(); return;
+                            }
+                        } else {
+                            displayMessage('Not enough mana to cast that spell!');
+                            playerTurnBoss(); return;
+                        }
+                        break;
+                    case 'activateFadewalk':
+                        if (player.evolvedPower === 'fadewalk' && !bossFightState.fadewalkActive) {
+                            bossFightState.fadewalkActive = true;
+                            displayMessage('You activate Fadewalk, becoming momentarily intangible! You will evade the next attack.');
+                        } else {
+                            displayMessage('Fadewalk is not available or already active.');
+                            playerTurnBoss(); return;
+                        }
+                        break;
+                    case 'reasonWithKnight':
+                        bossFightState.narrativeChoiceMade = true;
+                        if (player.morality > 20) { // Virtuous morality check
+                            displayMessage("You attempt to reach out to the Hollow Knight's lingering soul. Its wails soften, and its attacks become less precise. (Boss attack reduced)");
+                            currentEnemy.strength = Math.floor(currentEnemy.strength * 0.7); // Debuff boss
+                        } else {
+                            displayMessage("Your words have no effect on the Hollow Knight's tormented spirit. It attacks with renewed ferocity!");
+                        }
+                        break;
+                    case 'pressAttack':
+                        bossFightState.narrativeChoiceMade = true;
+                        displayMessage("You press the attack, ignoring its wails. The Hollow Knight seems to falter under your relentless assault.");
+                        currentEnemy.hp -= Math.floor(player.strength * 0.5); // Extra damage
+                        break;
+                    case 'disruptAshwyrm':
+                        bossFightState.narrativeChoiceMade = true;
+                        if (player.intelligence > 15) { // Intelligence check
+                            displayMessage("You analyze the Ashwyrm's connection to the lava and find a weak point in its energy flow. The lava around it recedes slightly. (Boss defense reduced)");
+                            currentEnemy.defenseBonus = (currentEnemy.defenseBonus || 0) - 5; // Example debuff
+                        } else {
+                            displayMessage("You try to disrupt its connection, but the Ashwyrm's power is too great. It retaliates with a burst of flame!");
+                            player.takeDamage(15);
+                        }
+                        break;
+                    case 'focusAshwyrm':
+                        bossFightState.narrativeChoiceMade = true;
+                        displayMessage("You focus all your might on the Ashwyrm, hoping to overwhelm it with sheer force.");
+                        break;
+                    case 'viewInventory':
+                        viewInventory(true);
+                        playerTurnBoss(); return;
+                    case 'flee':
+                        if (Math.random() < 0.2) { // Lower chance to flee from boss
+                            displayMessage('You manage to escape the boss battle!');
+                            currentEnemy = null; player.defenseBuff = 0;
+                            enterLocation(currentScene); // Return to boss location, but without combat
+                        } else {
+                            displayMessage('You failed to flee from the boss!');
+                            enemyTurnBoss();
+                        }
+                        return;
+                    default:
+                        displayMessage('Invalid combat choice. Please choose from the options.');
+                        playerTurnBoss(); return;
+                }
+            } else {
+                displayMessage('Invalid combat choice. Please choose from the options.');
+                playerTurnBoss(); return;
+            }
+            displayStats();
+            checkBossCombatEnd();
+        }
+
+        /**
+         * Checks if boss combat has ended, handles phase transitions.
+         */
+        function checkBossCombatEnd() {
+            if (currentEnemy.hp <= 0) {
+                displayMessage(`\n*** You defeated ${currentEnemy.name}! ***`);
+                player.gainXP(currentEnemy.xpReward);
+                if (currentEnemy.name === 'The Hollow Knight') {
+                    worldState.hollowKnight_defeated = true;
+                    player.addItem('obsidianGreatsword'); // Boss loot
+                    displayMessage('You found the Obsidian Greatsword!');
+                }
+                if (currentEnemy.name === 'Ashwyrm, the Flame Warden') {
+                    worldState.ashwyrm_defeated = true;
+                    player.addItem('fireCrystal'); // Boss loot
+                    displayMessage('You found a powerful Fire Crystal!');
+                }
+                currentEnemy = null; player.defenseBuff = 0;
+                enterLocation(currentScene);
+            } else {
+                // Check for phase transition
+                const currentPhaseData = currentEnemy.phases[bossFightState.currentPhase];
+                const nextPhaseIndex = bossFightState.currentPhase + 1;
+                const nextPhaseData = currentEnemy.phases[nextPhaseIndex];
+
+                if (nextPhaseData && (currentEnemy.hp / currentEnemy.maxHp) < nextPhaseData.hpThreshold) {
+                    bossFightState.currentPhase = nextPhaseIndex;
+                    displayMessage(`\n${currentEnemy.name} shifts! Phase ${nextPhaseIndex + 1}: ${nextPhaseData.name}`);
+                    bossFightState.narrativeChoiceMade = false; // Reset for new phase narrative choices
+                }
+                enemyTurnBoss();
+            }
+        }
+
+        /**
+         * Handles the boss's turn in combat.
+         */
+        function enemyTurnBoss() {
+            if (!currentEnemy) return;
+
+            displayMessage(`\nIt's ${currentEnemy.name}'s turn!`);
+            const currentPhaseAbilities = currentEnemy.phases[bossFightState.currentPhase].abilities;
+            const chosenAbility = currentPhaseAbilities[Math.floor(Math.random() * currentPhaseAbilities.length)];
+
+            let damageDealt = chosenAbility.damage();
+            if (chosenAbility.critChance && Math.random() < chosenAbility.critChance) {
+                damageDealt *= 1.5; // Critical hit
+                displayMessage(`${currentEnemy.name} lands a CRITICAL HIT!`);
+            }
+            player.takeDamage(damageDealt);
+            displayMessage(`${currentEnemy.name} uses ${chosenAbility.name}, dealing ${Math.floor(damageDealt)} damage.`);
+
+            if (chosenAbility.heal) {
+                currentEnemy.hp += chosenAbility.heal;
+                if (currentEnemy.hp > currentEnemy.maxHp) currentEnemy.hp = currentEnemy.maxHp;
+                displayMessage(`${currentEnemy.name} healed for ${chosenAbility.heal} HP.`);
+            }
+
+            if (player.currentHp <= 0) {
+                gameOver();
+            } else {
+                playerTurnBoss();
+            }
+        }
+
+        // --- Player Progression Module ---
+        /**
+         * Prompts the player to choose an Awakened Power.
+         */
+        function chooseAwakenedPower() {
+            gameState = 'choosePower';
+            displayMessage('\nA new power stirs within you. Choose your Awakened Power:');
+            const powerChoices = Object.keys(powers).map((powerId, i) => ({
+                text: `${powers[powerId].name} - ${powers[powerId].description}`,
+                value: i + 1,
+                powerId: powerId
+            }));
+            presentChoices(powerChoices, 'Type power number...', 'Choose Power');
+        }
+
+        /**
+         * Handles input for choosing an Awakened Power.
+         * @param {string} input - The player's input.
+         */
+        function handlePowerChoiceInput(input) {
+            const powerKeys = Object.keys(powers);
+            const choiceIndex = parseInt(input) - 1;
+
+            if (choiceIndex >= 0 && choiceIndex < powerKeys.length) {
+                const chosenPowerId = powerKeys[choiceIndex];
+                player.setAwakenedPower(chosenPowerId);
+                displayMessage(`Your destiny is set. Continue your adventure, ${player.name}!`);
+                enterLocation(currentScene);
+            } else {
+                displayMessage('Invalid choice. Please choose a number from the list.');
+            }
+        }
+
+        /**
+         * Prompts the player to choose a perk after leveling up.
+         */
+        function chooseLevelUpPerk() {
+            gameState = 'levelUpPerk';
+            displayMessage('\nChoose a perk to enhance your abilities:');
+            const availablePerks = [];
+
+            availablePerks.push({ id: 'statBoostStrength', name: 'Stat Boost (Strength)' });
+            availablePerks.push({ id: 'statBoostIntelligence', name: 'Stat Boost (Intelligence)' });
+            availablePerks.push({ id: 'statBoostDexterity', name: 'Stat Boost (Dexterity)' });
+
+            unlockedSpellsForLevelUp.forEach(spellId => {
+                if (!player.learnedSpells.includes(spellId)) {
+                    availablePerks.push({ id: `newSpell${spellId.charAt(0).toUpperCase() + spellId.slice(1)}`, name: `New Spell (${spells[spellId].name})` });
+                }
+            });
+
+            if (player.awakenedPower) {
+                const powerUpgradeId = `upgrade${player.awakenedPower.charAt(0).toUpperCase() + player.awakenedPower.slice(1)}`;
+                if (perks[powerUpgradeId] && !player.perks.includes(powerUpgradeId)) {
+                    availablePerks.push({ id: powerUpgradeId, name: `Upgrade Power (${powers[player.awakenedPower].name})` });
+                }
+            }
+
+            presentChoices(availablePerks.map((p, i) => ({ text: p.name, value: i + 1, perkId: p.id })), 'Type perk number...', 'Choose Perk');
+        }
+
+        /**
+         * Handles input for choosing a level-up perk.
+         * @param {string} input - The player's input.
+         */
+        function handleLevelUpPerkInput(input) {
+            const choiceIndex = parseInt(input) - 1;
+            const availablePerks = [];
+
+            availablePerks.push({ id: 'statBoostStrength', name: 'Stat Boost (Strength)' });
+            availablePerks.push({ id: 'statBoostIntelligence', name: 'Stat Boost (Intelligence)' });
+            availablePerks.push({ id: 'statBoostDexterity', name: 'Stat Boost (Dexterity)' });
+
+            unlockedSpellsForLevelUp.forEach(spellId => {
+                if (!player.learnedSpells.includes(spellId)) {
+                    availablePerks.push({ id: `newSpell${spellId.charAt(0).toUpperCase() + spellId.slice(1)}`, name: `New Spell (${spells[spellId].name})` });
+                }
+            });
+
+            if (player.awakenedPower) {
+                const powerUpgradeId = `upgrade${player.awakenedPower.charAt(0).toUpperCase() + player.awakenedPower.slice(1)}`;
+                if (perks[powerUpgradeId] && !player.perks.includes(powerUpgradeId)) {
+                    availablePerks.push({ id: powerUpgradeId, name: `Upgrade Power (${powers[player.awakenedPower].name})` });
+                }
+            }
+
+            if (choiceIndex >= 0 && choiceIndex < availablePerks.length) {
+                const chosenPerkId = availablePerks[choiceIndex].id;
+                const perk = perks[chosenPerkId];
+
+                if (perk.type === 'stat') {
+                    player.addPerk(chosenPerkId);
+                } else if (perk.type === 'spell') {
+                    player.learnSpell(perk.spellId);
+                    player.addPerk(chosenPerkId);
+                } else if (perk.type === 'power_upgrade') {
+                    player.addPerk(chosenPerkId);
+                }
+                displayMessage(`You chose: ${perk.name}!`);
+                enterLocation(currentScene);
+            } else {
+                displayMessage('Invalid choice. Please choose a number from the list.');
+            }
+        }
+
+        /**
+         * Triggers the quest to evolve the player's chosen power.
+         */
+        function chooseEvolvedPower() {
+            gameState = 'chooseEvolvedPower';
+            displayMessage('\n*** Your Awakened Power is ready to Evolve! ***');
+            displayMessage('A deeper connection to your inner strength has formed. You can now evolve your power into a stronger form.');
+
+            const currentPower = powers[player.awakenedPower];
+            const evolvedPower = evolvedPowers[currentPower.evolved];
+
+            displayMessage(`Your current power: ${currentPower.name} - ${currentPower.description}`);
+            displayMessage(`Its evolved form: ${evolvedPower.name} - ${evolvedPower.description}`);
+
+            displayMessage('Do you wish to pursue this evolution?');
+            presentChoices([
+                { text: 'Yes, I embrace this evolution!', action: 'evolvePower' },
+                { text: 'No, I wish to remain as I am for now.', action: 'delayEvolution' }
+            ], 'Type choice number...', 'Decide');
+        }
+
+        /**
+         * Handles input for choosing to evolve or delay the power evolution.
+         * @param {string} input - The player's input.
+         */
+        function handleEvolvedPowerChoice(input) {
+            const choice = parseInt(input);
+            if (choice === 1) {
+                const currentPower = powers[player.awakenedPower];
+                player.setEvolvedPower(currentPower.evolved);
+                displayMessage(`Your ${currentPower.name} has evolved into ${evolvedPowers[currentPower.evolved].name}!`);
+                enterLocation(currentScene);
+            } else if (choice === 2) {
+                displayMessage('You decide to delay your power\'s evolution for now. The path remains open when you are ready.');
+                enterLocation(currentScene);
+            } else {
+                displayMessage('Invalid choice. Please choose 1 or 2.');
+            }
+        }
+
+        // --- Inventory and Item Management Module ---
+        /**
+         * Displays the player's inventory.
+         * @param {boolean} inCombat - True if viewing inventory during combat.
+         */
+        function viewInventory(inCombat = false) {
+            displayMessage('\n--- Inventory ---');
+            if (player.inventory.length === 0) {
+                displayMessage('Your inventory is empty.');
+            } else {
+                player.inventory.forEach((item, index) => {
+                    displayMessage(`${index + 1}. ${items[item.id].name} (x${item.count}) - Type: ${items[item.id].type}`);
+                });
+            }
+            displayMessage(`Equipped Weapon: ${player.equippedWeapon ? items[player.equippedWeapon].name : 'None'}`);
+            displayMessage(`Equipped Armor: ${player.equippedArmor ? items[player.equippedArmor].name : 'None'}`);
+
+            if (!inCombat) {
+                displayMessage('\nTo use an item, type "use [item name]". To equip, type "use [weapon/armor name]".');
+                displayMessage('Type "look" or a choice number to continue exploring.');
+            } else {
+                displayMessage('\nTo use a potion, type "use [potion name]".');
+                displayMessage('Type your combat action number to continue combat.');
+            }
+            gameInput.placeholder = inCombat ? 'Type combat action or "use [item]"...' : 'Type "look", "use [item]", "travel to [region]", or choice number...';
+        }
+
+        /**
+         * Uses an item from the inventory.
+         * @param {string} itemName - The name of the item to use.
+         * @returns {boolean} - True if item was used/equipped, false otherwise.
+         */
+        function useItem(itemName) {
+            const itemEntry = player.inventory.find(item => items[item.id].name.toLowerCase() === itemName.toLowerCase());
+
+            if (!itemEntry) {
+                displayMessage(`You don't have "${itemName}" in your inventory.`);
+                return false;
+            }
+
+            const itemId = itemEntry.id;
+            const item = items[itemId];
+
+            if (item.type === 'potion') {
+                item.effect();
+                player.removeItem(itemId);
+                return true;
+            } else if (item.type === 'weapon' || item.type === 'armor') {
+                player.equipItem(itemId);
+                return true;
+            } else if (item.type === 'quest') {
+                displayMessage(`You cannot directly "use" the ${item.name}. It might be for a quest.`);
+                return false;
+            } else {
+                displayMessage(`You cannot use "${item.name}" in that way.`);
+                return false;
+            }
+        }
+
+        // --- Save/Load Module ---
+        /**
+         * Saves the current game state to localStorage.
+         */
+        function saveGame() {
+            try {
+                const saveState = {
+                    player: {
+                        name: player.name, pClass: player.pClass, race: player.race, origin: player.origin,
+                        level: player.level, xp: player.xp, xpToNextLevel: player.xpToNextLevel,
+                        gold: player.gold, inventory: player.inventory,
+                        equippedWeapon: player.equippedWeapon, equippedArmor: player.equippedArmor,
+                        learnedSpells: player.learnedSpells, awakenedPower: player.awakenedPower,
+                        evolvedPower: player.evolvedPower,
+                        perks: player.perks, reputation: player.reputation, morality: player.morality,
+                        maxHp: player.maxHp, currentHp: player.currentHp,
+                        maxMana: player.maxMana, currentMana: player.currentMana,
+                        strength: player.strength, intelligence: player.intelligence, dexterity: player.dexterity
+                    },
+                    questState: questState,
+                    worldState: worldState,
+                    currentScene: currentScene,
+                    bossFightState: bossFightState
+                };
+                localStorage.setItem('theLostArtifactSave', JSON.stringify(saveState));
+                displayMessage('Game saved successfully!');
+            } catch (e) {
+                displayMessage('Failed to save game. Your browser might not support localStorage or it\'s full.');
+                console.error("Save game error:", e);
+            }
+        }
+
+        /**
+         * Loads the game state from localStorage.
+         */
+        function loadGame() {
+            try {
+                const savedState = localStorage.getItem('theLostArtifactSave');
+                if (savedState) {
+                    const parsedState = JSON.parse(savedState);
+
+                    player = new Player(
+                        parsedState.player.name, parsedState.player.pClass,
+                        parsedState.player.race, parsedState.player.origin
+                    );
+                    Object.assign(player, parsedState.player);
+
+                    questState = parsedState.questState;
+                    worldState = parsedState.worldState;
+                    currentScene = parsedState.currentScene;
+                    bossFightState = parsedState.bossFightState || {};
+
+                    displayMessage('Game loaded successfully!');
+                    enterLocation(currentScene);
+                } else {
+                    displayMessage('No saved game found.');
+                }
+            } catch (e) {
+                displayMessage('Failed to load game. Save data might be corrupted.');
+                console.error("Load game error:", e);
+            }
+        }
+
+        // --- Main Input Handler ---
+        /**
+         * Main input handler for the game, directing input to the correct state handler.
+         */
+        function handleInput() {
+            const input = gameInput.value.trim().toLowerCase();
+            gameInput.value = '';
+
+            if (!input) {
+                displayMessage('Please enter a valid input.');
+                return;
+            }
+
+            switch (gameState) {
+                case 'characterCreation': handleCharacterCreationInput(input); break;
+                case 'intro': handleIntroInput(input); break;
+                case 'quest1': handleQuest1Input(input); break;
+                case 'exploration': handleExplorationInput(input); break;
+                case 'combat': handleCombatInput(input); break;
+                case 'bossCombat': handleBossCombatInput(input); break;
+                case 'choosePower': handlePowerChoiceInput(input); break;
+                case 'levelUpPerk': handleLevelUpPerkInput(input); break;
+                case 'chooseEvolvedPower': handleEvolvedPowerChoice(input); break;
+                case 'town': handleTownInput(input); break;
+                case 'npcDialogue': handleNPCDialogueInput(input); break;
+                case 'healerInteraction': handleHealerInteraction(input); break;
+                case 'marketInteraction': handleMarketInteraction(input); break;
+                case 'marketBuy': handleMarketBuy(input); break;
+                case 'marketSell': handleMarketSell(input); break;
+                case 'travelEvent': handleTravelEventInput(input); break;
+                case 'dreamSequence': handleDreamSequenceInput(input); break;
+                case 'actIITrigger': handleActIITriggerInput(input); break; // New: Act II trigger input handler
+                case 'branchingPath': handleBranchingPathInput(input); break; // New: Branching path input handler
+                case 'gameOver': displayMessage('The game is over. Refresh to play again!'); break;
+            }
+        }
+
+        // --- Quest Completion Checks ---
+        /**
+         * Checks if the "Embers of Memory" quest is complete and triggers the next stage.
+         */
+        function checkEmbersOfMemoryQuestCompletion() {
+            if (questState.embersOfMemory.started && questState.embersOfMemory.foundMemoryFragment1 && questState.embersOfMemory.foundSpellScroll && questState.embersOfMemory.defeatedSpirit && !questState.embersOfMemory.completed) {
+                questState.embersOfMemory.completed = true;
+                displayMessage('\n*** Quest Complete: Embers of Memory! ***');
+                displayMessage('With the spell scroll in hand and a fragment of memory recovered, the ghostly figure reappears before you, its form more solid.');
+                displayMessage('"You have done well, stranger. The path to your past, and Ashvale\'s future, begins to clear. Now, choose. Choose the power that will guide your destiny, the power that has awakened within you."');
+                chooseAwakenedPower();
+            }
+        }
+
+        // --- Dream Sequence Module ---
+        /**
+         * Triggers a dream sequence.
+         */
+        function startDreamSequence() {
+            gameState = 'dreamSequence';
+            displayMessage('\n*** You drift into a deep sleep... and into a dream. ***');
+            const dreamType = Math.floor(Math.random() * 3); // 0: Morality, 1: Power, 2: Memory
+
+            switch (dreamType) {
+                case 0: // Morality Dream
+                    displayMessage('You stand before a shimmering portal. A voice whispers, "Choose your path, adventurer. Will you walk in light or shadow?"');
+                    presentChoices([
+                        { text: 'Step into the light (Virtuous choice)', action: 'moralityDream', choice: 'light' },
+                        { text: 'Step into the shadow (Corrupt choice)', action: 'moralityDream', choice: 'shadow' }
+                    ], 'Type choice number...', 'Choose Path');
+                    break;
+                case 1: // Power Dream
+                    displayMessage('A swirling vortex of raw energy appears before you. It beckons, promising power beyond measure.');
+                    presentChoices([
+                        { text: 'Reach into the vortex (Gain a random spell)', action: 'powerDream', choice: 'reach' },
+                        { text: 'Resist its pull (Gain some mana)', action: 'powerDream', choice: 'resist' }
+                    ], 'Type choice number...', 'Decide');
+                    break;
+                case 2: // Memory Dream
+                    displayMessage('Familiar faces flicker in the mist, whispering forgotten names. A fragmented memory begins to form.');
+                    presentChoices([
+                        { text: 'Try to grasp the memory (Gain Intelligence)', action: 'memoryDream', choice: 'grasp' },
+                        { text: 'Let the memory fade (Gain HP)', action: 'memoryDream', choice: 'fade' }
+                    ], 'Type choice number...', 'Recall');
+                    break;
+            }
+        }
+
+        /**
+         * Handles input during a dream sequence.
+         * @param {string} input - The player's input.
+         */
+        function handleDreamSequenceInput(input) {
+            const choice = parseInt(input);
+            const selectedButton = choiceButtonsContainer.children[choice - 1];
+
+            if (!selectedButton) {
+                displayMessage('Invalid choice. Please choose from the options.');
+                return;
+            }
+
+            const chosenAction = selectedButton.dataset.action;
+            const chosenSubChoice = selectedButton.dataset.choice;
+
+            switch (chosenAction) {
+                case 'moralityDream':
+                    if (chosenSubChoice === 'light') {
+                        displayMessage('You step into the light. A warmth fills you. You feel more virtuous. (+10 Morality)');
+                        player.adjustMorality(10);
+                    } else {
+                        displayMessage('You step into the shadow. A cold resolve settles within you. You feel more corrupt. (-10 Morality)');
+                        player.adjustMorality(-10);
+                    }
+                    break;
+                case 'powerDream':
+                    if (chosenSubChoice === 'reach') {
+                        const availableSpells = Object.keys(spells).filter(s => !player.learnedSpells.includes(s));
+                        if (availableSpells.length > 0) {
+                            const newSpellId = availableSpells[Math.floor(Math.random() * availableSpells.length)];
+                            player.learnSpell(newSpellId);
+                            displayMessage(`You learned the spell: ${spells[newSpellId].name}!`);
+                        } else {
+                            displayMessage('You already know all spells, but feel a surge of raw power. (+1 Intelligence)');
+                            player.intelligence += 1;
+                        }
+                    } else {
+                        displayMessage('You resist the pull, feeling your inner reserves strengthen. (+20 Mana)');
+                        player.restoreMana(20);
+                    }
+                    break;
+                case 'memoryDream':
+                    if (chosenSubChoice === 'grasp') {
+                        displayMessage('A clear image forms: a forgotten ritual, a powerful incantation. You feel your mind sharpen. (+2 Intelligence)');
+                        player.intelligence += 2;
+                    } else {
+                        displayMessage('You let the memory fade, finding comfort in the present. You feel a surge of vitality. (+20 HP)');
+                        player.heal(20);
+                    }
+                    break;
+            }
+            displayMessage('\nYou awaken from your dream, refreshed.');
+            enterLocation(currentScene);
+        }
+
+        // --- Act II Module ---
+        /**
+         * Checks if the conditions for Act II have been met.
+         */
+        function checkActIITrigger() {
+            if (worldState.actII_triggered) return; // Already triggered
+
+            const levelThresholdMet = player.level >= 6;
+            const questsCompleted = quests.forestWhispers.status === 'completed' && quests.eldermoorSecrets.status === 'completed';
+
+            if (levelThresholdMet || questsCompleted) {
+                worldState.actII_triggered = true;
+                displayMessage('\n*** A Cataclysmic Turning Point! ***');
+                displayMessage('As you continue your journey, the sky above Ashvale tears open! A massive rift, crackling with chaotic energy, appears – the Veil Between Realms has ripped apart, unleashing corrupted spirits and ancient forces upon the world!');
+                displayMessage('All regions feel more dangerous, and new, terrifying threats emerge. The world will never be the same.');
+                displayMessage('You feel an urgent pull towards Elder Maelin in New Ashvale. She may have answers, or at least guidance, in this new, terrifying reality.');
+
+                // Add new Act II regions to location choices (if not already there)
+                const ashvaleRuinsChoices = locations.ashvaleRuins.choices;
+                if (!ashvaleRuinsChoices.some(c => c.target === 'veilscarCrater')) {
+                    ashvaleRuinsChoices.push({ text: 'Venture to the Veilscar Crater (New Region)', action: 'explore', target: 'veilscarCrater' });
+                }
+                if (!ashvaleRuinsChoices.some(c => c.target === 'templeOfShatteredOath')) {
+                    ashvaleRuinsChoices.push({ text: 'Explore the Temple of the Shattered Oath (New Region)', action: 'explore', target: 'templeOfShatteredOath' });
+                }
+
+                // Immediately transition to a state where the player needs to speak to Maelin
+                gameState = 'actIITrigger';
+                gameInput.placeholder = 'Press Enter to continue to New Ashvale...';
+                submitButton.textContent = 'Continue';
+            }
+        }
+
+        /**
+         * Handles input during the Act II trigger sequence.
+         * @param {string} input - The player's input.
+         */
+        function handleActIITriggerInput(input) {
+            // Any input will move the player to New Ashvale to speak with Maelin
+            displayMessage('You rush towards New Ashvale, seeking answers amidst the chaos.');
+            enterLocation('newAshvale');
+            // Force Maelin's dialogue if player is in New Ashvale and Act II is triggered
+            if (currentScene === 'newAshvale' && worldState.actII_triggered) {
+                currentNPC = 'maelin';
+                startNPCDialogue('maelin');
+            }
+        }
+
+        /**
+         * Handles the player's choice of narrative path after Act II is triggered.
+         * @param {string} path - The chosen path ('virtuous', 'corrupt', 'neutral').
+         * @param {string} vision - A short vision/consequence text.
+         */
+        function handleChooseNarrativePath(path, vision) {
+            worldState.chosenPath = path;
+            displayMessage(`\n*** You have chosen the ${path.charAt(0).toUpperCase() + path.slice(1)} Path! ***`);
+            displayMessage(`Your vision: "${vision}"`);
+
+            if (path === 'virtuous') {
+                displayMessage('A faint, warm light surrounds you. You feel a renewed sense of purpose.');
+                player.strength += 1;
+                player.intelligence += 1;
+                player.adjustMorality(5);
+            } else if (path === 'corrupt') {
+                displayMessage('A cold, dark energy courses through your veins. You feel a surge of raw, untamed power.');
+                player.strength += 2;
+                player.hp += 10;
+                player.adjustMorality(-5);
+            } else if (path === 'neutral') {
+                displayMessage('You feel a quiet determination. Your path is your own, unburdened by external loyalties.');
+                player.dexterity += 2;
+            }
+            displayStats();
+            displayMessage('Your journey continues, now with a clearer direction.');
+            enterLocation(currentScene); // Return to Maelin's location, or wherever they were
+        }
+
+        /**
+         * Handles input when the player is choosing a branching narrative path.
+         * This function will primarily delegate to handleNPCDialogueInput as the choices are presented by Maelin.
+         * @param {string} input - The player's input.
+         */
+        function handleBranchingPathInput(input) {
+            handleNPCDialogueInput(input);
+        }
+
+
+        // Initialize the game when the window loads
+        window.onload = initGame;
+
+        // Optional: Trigger a dream sequence after some time or event
+        // For demonstration, let's add a small chance to dream after entering a new location (not town)
+        const originalEnterLocation = enterLocation;
+        enterLocation = function(locationId) {
+            originalEnterLocation(locationId);
+            if (gameState === 'exploration' && Math.random() < 0.1 && !player.isDreaming) { // 10% chance to dream
+                // player.isDreaming = true; // Set flag to prevent multiple dreams
+                setTimeout(() => {
+                    if (gameState === 'exploration') { // Only dream if still exploring
+                        startDreamSequence();
+                    }
+                }, 2000); // 2 second delay before dream
+            }
+        };
+
+    </script>
+</body>
+</html>
