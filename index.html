@@ -86,9 +86,6 @@
             transition: background-color 0.2s;
             text-align: left;
         }
-        .choice-button:hover {
-            background-color: #6b7280;
-        }
         .choice-button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -883,17 +880,17 @@
                 this.inventory = [{ id: 'healingPotion', count: 1 }];
                 this.equippedWeapon = null;
                 this.equippedArmor = null;
-                this.learnedSpells = [];
+                this.learnedSpells = []; // Ensure explicit initialization
                 this.awakenedPower = null;
-                this.evolvedPower = null; // New: Tier II power
-                this.perks = [];
+                this.evolvedPower = null;
+                this.perks = [];         // Ensure explicit initialization
                 this.defenseBuff = 0;
                 this.dodgeAvailable = true;
                 this.reputation = {
                     orderOfFlame: 0,
                     shadowSyndicate: 0
                 };
-                this.morality = 0; // New: -100 (Corrupt) to 100 (Virtuous)
+                this.morality = 0;
                 this.initializeStats();
                 this.equipInitialItems();
             }
@@ -1257,11 +1254,22 @@
             if (player.morality > 20) moralityStatus = 'Virtuous';
             else if (player.morality < -20) moralityStatus = 'Corrupt';
 
+            // Added safety checks for properties that might be undefined during initial setup or if state is corrupted
+            const equippedWeaponName = player.equippedWeapon ? items[player.equippedWeapon].name : 'None';
+            const equippedArmorName = player.equippedArmor ? items[player.equippedArmor].name : 'None';
+            const learnedSpellsList = (player.learnedSpells || []).map(s => spells[s] ? spells[s].name : 'Unknown Spell').join(', ') || 'None';
+            const awakenedPowerName = player.awakenedPower ? powers[player.awakenedPower].name : 'None';
+            const evolvedPowerName = player.evolvedPower ? evolvedPowers[player.evolvedPower].name : 'None';
+            const perksList = (player.perks || []).map(p => perks[p] ? perks[p].name : 'Unknown Perk').join(', ') || 'None';
+            const originDescription = player.origin ? origins[player.origin].description.split('.')[0] : 'N/A';
+            const chosenPathDisplay = worldState.chosenPath ? worldState.chosenPath.charAt(0).toUpperCase() + worldState.chosenPath.slice(1) : 'None';
+
+
             gameStats.innerHTML = `
                 <div><strong>Name:</strong> ${player.name}</div>
                 <div><strong>Class:</strong> ${player.pClass.charAt(0).toUpperCase() + player.pClass.slice(1)}</div>
                 <div><strong>Race:</strong> ${player.race.charAt(0).toUpperCase() + player.race.slice(1)}</div>
-                <div><strong>Origin:</strong> ${player.origin ? origins[player.origin].description.split('.')[0] : 'N/A'}</div>
+                <div><strong>Origin:</strong> ${originDescription}</div>
                 <div><strong>Level:</strong> ${player.level} (XP: ${player.xp}/${player.xpToNextLevel})</div>
                 <div><strong>HP:</strong> ${player.currentHp}/${player.maxHp}</div>
                 <div><strong>Mana:</strong> ${player.currentMana}/${player.maxMana}</div>
@@ -1269,15 +1277,15 @@
                 <div><strong>Intelligence:</strong> ${player.intelligence}</div>
                 <div><strong>Dexterity:</strong> ${player.dexterity}</div>
                 <div><strong>Gold:</strong> ${player.gold}</div>
-                <div class="col-span-2"><strong>Equipped Weapon:</strong> ${player.equippedWeapon ? items[player.equippedWeapon].name : 'None'}</div>
-                <div class="col-span-2"><strong>Equipped Armor:</strong> ${player.equippedArmor ? items[player.equippedArmor].name : 'None'}</div>
-                <div class="col-span-2"><strong>Spells:</strong> ${player.learnedSpells.map(s => spells[s].name).join(', ') || 'None'}</div>
-                <div class="col-span-2"><strong>Awakened Power:</strong> ${player.awakenedPower ? powers[player.awakenedPower].name : 'None'}</div>
-                <div class="col-span-2"><strong>Evolved Power:</strong> ${player.evolvedPower ? evolvedPowers[player.evolvedPower].name : 'None'}</div>
-                <div class="col-span-2"><strong>Perks:</strong> ${player.perks.map(p => perks[p].name).join(', ') || 'None'}</div>
-                <div class="col-span-2"><strong>Reputation:</strong> Order of Flame: ${player.reputation.orderOfFlame}, Shadow Syndicate: ${player.reputation.shadowSyndicate}</div>
+                <div class="col-span-2"><strong>Equipped Weapon:</strong> ${equippedWeaponName}</div>
+                <div class="col-span-2"><strong>Equipped Armor:</strong> ${equippedArmorName}</div>
+                <div class="col-span-2"><strong>Spells:</strong> ${learnedSpellsList}</div>
+                <div class="col-span-2"><strong>Awakened Power:</strong> ${awakenedPowerName}</div>
+                <div class="col-span-2"><strong>Evolved Power:</strong> ${evolvedPowerName}</div>
+                <div class="col-span-2"><strong>Perks:</strong> ${perksList}</div>
+                <div class="col-span-2"><strong>Reputation:</strong> Order of Flame: ${(player.reputation && player.reputation.orderOfFlame !== undefined) ? player.reputation.orderOfFlame : 'N/A'}, Shadow Syndicate: ${(player.reputation && player.reputation.shadowSyndicate !== undefined) ? player.reputation.shadowSyndicate : 'N/A'}</div>
                 <div class="col-span-2"><strong>Morality:</strong> ${moralityStatus} (${player.morality})</div>
-                <div class="col-span-2"><strong>Chosen Path:</strong> ${worldState.chosenPath ? worldState.chosenPath.charAt(0).toUpperCase() + worldState.chosenPath.slice(1) : 'None'}</div>
+                <div class="col-span-2"><strong>Chosen Path:</strong> ${chosenPathDisplay}</div>
             `;
         }
 
@@ -1426,38 +1434,56 @@
          * @param {string} input - The player's input.
          */
         function handleCharacterCreationInput(input) {
+            console.log("handleCharacterCreationInput called with input:", input, "Current player state:", player);
             if (!player || !player.name) {
                 player = { name: input };
+                console.log("Player name set:", player.name);
                 chooseClass();
             } else if (!player.pClass) {
                 const classKeys = Object.keys(classes);
                 const choiceIndex = parseInt(input) - 1;
+                console.log("Class choiceIndex:", choiceIndex, "Class keys:", classKeys);
                 if (choiceIndex >= 0 && choiceIndex < classKeys.length) {
                     player.pClass = classKeys[choiceIndex];
+                    console.log("Player class set:", player.pClass);
                     chooseRace();
                 } else {
                     displayMessage('Invalid class choice. Please choose a number from the list.');
+                    console.error("Invalid class choice:", input);
+                }
+                // Fallback error message for class selection
+                if (!player.pClass && choiceIndex >= 0 && choiceIndex < classKeys.length) { // Only show if input was valid but class wasn't set
+                    displayMessage("Something went wrong during class selection. Please try selecting a class again.");
+                    console.error("Fallback triggered: player.pClass not set after selection attempt.");
+                    chooseClass(); // Re-prompt for class selection
                 }
             } else if (!player.race) {
                 const raceKeys = Object.keys(races);
                 const choiceIndex = parseInt(input) - 1;
+                console.log("Race choiceIndex:", choiceIndex, "Race keys:", raceKeys);
                 if (choiceIndex >= 0 && choiceIndex < raceKeys.length) {
                     player.race = raceKeys[choiceIndex];
+                    console.log("Player race set:", player.race);
                     chooseOrigin();
                 } else {
                     displayMessage('Invalid race choice. Please choose a number from the list.');
+                    console.error("Invalid race choice:", input);
                 }
             } else if (!player.origin) {
                 const originKeys = Object.keys(origins);
                 const choiceIndex = parseInt(input) - 1;
+                console.log("Origin choiceIndex:", choiceIndex, "Origin keys:", originKeys);
                 if (choiceIndex >= 0 && choiceIndex < originKeys.length) {
                     player.origin = originKeys[choiceIndex];
+                    console.log("Player origin set:", player.origin);
                     player = new Player(player.name, player.pClass, player.race, player.origin);
+                    console.log("New Player object created:", player);
                     displayMessage(`\nWelcome, ${player.name} the ${player.race.charAt(0).toUpperCase() + player.race.slice(1)} ${player.pClass.charAt(0).toUpperCase() + player.pClass.slice(1)}!`);
                     displayStats();
                     startGameIntro();
                 } else {
                     displayMessage('Invalid origin choice. Please choose a number from the list.');
+                    console.error("Invalid origin choice:", input);
                 }
             }
         }
@@ -1471,9 +1497,6 @@
             displayMessage('You stir, a dull ache throbbing behind your eyes. Disorientation is your only companion as you slowly open them to a world of dust and ruin. Charred timbers and collapsed roofs stretch around you, the skeletal remains of what was once Ashvale, a once-thriving village now consumed by a magical catastrophe.');
             displayMessage('Beside you, a scorched obelisk stands eerily, its surface etched with a glowing, unfamiliar sigil. As you gaze at it, a voice whispers directly into your mind, chilling you to the bone: "You must remember who you are... or all will be lost."');
             displayMessage('Your hand brushes against something cold and smooth beside you. It\'s a small, intricately carved stone, glowing faintly with an inner light. This "Mysterious Artifact" is the only thing you possess, a silent testament to a forgotten past.');
-
-            displayMessage('\nAs you try to process this, a translucent, shimmering figure coalesces before you – a ghostly villager, their eyes filled with an ancient sorrow.');
-            displayMessage('"Stranger," the spectral voice echoes, "the catastrophe that befell Ashvale stole our memories, our very essence. I am but an echo. If you seek to understand this place, and perhaps yourself, you must recover the fragments of memory scattered within these ruins. Begin by searching the village temple to the west. A powerful spell scroll, vital to understanding the sigil, lies hidden there. This is your first quest: Embers of Memory."');
 
             questState = {
                 embersOfMemory: { started: true, foundMemoryFragment1: false, foundSpellScroll: false, defeatedSpirit: false, completed: false },
@@ -3264,7 +3287,29 @@
                         parsedState.player.name, parsedState.player.pClass,
                         parsedState.player.race, parsedState.player.origin
                     );
-                    Object.assign(player, parsedState.player);
+                    // Manually assign properties that might be missing or different in structure
+                    // This is safer than Object.assign directly for nested objects or arrays
+                    player.level = parsedState.player.level;
+                    player.xp = parsedState.player.xp;
+                    player.xpToNextLevel = parsedState.player.xpToNextLevel;
+                    player.gold = parsedState.player.gold;
+                    player.inventory = parsedState.player.inventory || []; // Ensure it's an array
+                    player.equippedWeapon = parsedState.player.equippedWeapon;
+                    player.equippedArmor = parsedState.player.equippedArmor;
+                    player.learnedSpells = parsedState.player.learnedSpells || []; // Ensure it's an array
+                    player.awakenedPower = parsedState.player.awakenedPower;
+                    player.evolvedPower = parsedState.player.evolvedPower;
+                    player.perks = parsedState.player.perks || []; // Ensure it's an array
+                    player.reputation = parsedState.player.reputation || { orderOfFlame: 0, shadowSyndicate: 0 };
+                    player.morality = parsedState.player.morality;
+                    player.maxHp = parsedState.player.maxHp;
+                    player.currentHp = parsedState.player.currentHp;
+                    player.maxMana = parsedState.player.maxMana;
+                    player.currentMana = parsedState.player.currentMana;
+                    player.strength = parsedState.player.strength;
+                    player.intelligence = parsedState.player.intelligence;
+                    player.dexterity = parsedState.player.dexterity;
+
 
                     questState = parsedState.questState;
                     worldState = parsedState.worldState;
